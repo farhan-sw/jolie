@@ -1,3 +1,8 @@
+# PlatformIO Project
+**/.pio/
+**/.swp/
+**/.vscode/
+
 # Prerequisites
 *.d
 
