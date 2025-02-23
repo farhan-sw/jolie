@@ -20,3 +20,18 @@ This file contains the date logs for each development progress. It contains the 
 - **Next Steps**: 
     - Make an OOP for the main C file, and integrate with the current base code
     - Make a folder contain libraries
+
+
+### [2025-02-20]
+- **Progress**: 
+    - Import URDF model based on KRAI Description
+    ```bash
+    sudo apt-get install ros-humble-urdf-tutorial
+    
+    ros2 launch urdf_tutorial display.launch.py model:=/home/farhan-sw/Documents/GitHub/jolie/jolie_humble/src/jolie_description/urdf/nebula_4wd.urdf.xacro
+    ```
+
+- **References**:
+    - https://github.com/hippo5329/micro_ros_arduino_examples_platformio
+    - https://github.com/hippo5329/micro_ros_arduino_examples_platformio/wiki
+    

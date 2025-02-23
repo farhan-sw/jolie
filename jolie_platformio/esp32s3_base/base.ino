@@ -5,6 +5,9 @@
 #include <rclc/executor.h>
 #include <std_msgs/msg/float32.h>
 
+#include "../lib/ConfigPin/ConfigPin.h"
+#include "../lib/FIR/FIR.h"
+
 // Publishers for measured velocities
 rcl_publisher_t publisher_fl;
 rcl_publisher_t publisher_fr;

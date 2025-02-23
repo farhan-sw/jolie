@@ -1,0 +1,9 @@
+<library path="jolie_firmware" >
+    <class name="jolie_firmware/JolieBaseInterface"
+           type="jolie_firmware::JolieBaseInterface"
+           base_class_type="hardware_interface::SystemInterface">
+        <description>
+            This class provides the interface to the Nebula firmware for 4wd robots of omni.
+        </description>
+    </class>
+</library>

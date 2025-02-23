@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+
+<robot name="sirius" xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <ros2_control name="RobotSystem" type="system">
+        <!-- ros2_control Gazebo -->
+        <xacro:if value="$(arg is_simulation)">
+            <!-- ROS 2 Humble -->
+            <xacro:if value="$(arg is_ignition)">
+                <hardware>
+                    <plugin>ign_ros2_control/IgnitionSystem</plugin>
+                </hardware>
+            </xacro:if>
+
+            <!-- ROS 2 Iron or above -->
+            <xacro:unless value="$(arg is_ignition)">
+                <hardware>
+                    <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+                </hardware>
+            </xacro:unless>
+        </xacro:if>
+
+        <xacro:unless value="$(arg is_simulation)">
+            <xacro:if value="$(arg is_topicbased)">
+                <hardware>
+                    <plugin>topic_based_ros2_control/TopicBasedSystem</plugin>
+                    <param name="joint_commands_topic">/target_velocities</param>
+                    <param name="joint_states_topic">/wheel_states</param>
+                    <param name="trigger_joint_command_threshold">0.01</param>
+                </hardware>
+            </xacro:if>
+
+            <xacro:unless value="$(arg is_topicbased)">
+                <hardware>
+                    <plugin>jolie_firmware/JolieBaseInterface</plugin>
+                    <param name="base_sub_front_left_topic">/velocity_fl</param>
+                    <param name="base_sub_front_right_topic">/velocity_fr</param>
+                    <param name="base_sub_back_left_topic">/velocity_bl</param>
+                    <param name="base_sub_back_right_topic">/velocity_br</param>
+                    <param name="base_pub_front_left_topic">/target_velocity_fl</param>
+                    <param name="base_pub_front_right_topic">/target_velocity_fr</param>
+                    <param name="base_pub_back_left_topic">/target_velocity_bl</param>
+                    <param name="base_pub_back_right_topic">/target_velocity_br</param>
+                </hardware>
+            </xacro:unless>
+        </xacro:unless>
+
+        <!-- ros2_control Robot Hardware Interfaces -->
+        <joint name="wheel1_joint">
+            <command_interface name="velocity">
+                <param name="min">-1</param>
+                <param name="max">1</param>
+            </command_interface>
+            <state_interface name="position">
+                <param name="initial_value">0.0</param>
+            </state_interface>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <joint name="wheel2_joint">
+            <command_interface name="velocity">
+                <param name="min">-1</param>
+                <param name="max">1</param>
+            </command_interface>
+            <state_interface name="position">
+                <param name="initial_value">0.0</param>
+            </state_interface>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <joint name="wheel3_joint">
+            <command_interface name="velocity">
+                <param name="min">-1</param>
+                <param name="max">1</param>
+            </command_interface>
+            <state_interface name="position">
+                <param name="initial_value">0.0</param>
+            </state_interface>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <joint name="wheel4_joint">
+            <command_interface name="velocity">
+                <param name="min">-1</param>
+                <param name="max">1</param>
+            </command_interface>
+            <state_interface name="position">
+                <param name="initial_value">0.0</param>
+            </state_interface>
+            <state_interface name="velocity"/>
+        </joint>
+
+    </ros2_control>
+
+    <!-- ROS 2 Control -->
+    <gazebo>
+        <!-- ROS 2 Humble -->
+        <xacro:if value="$(arg is_ignition)">
+        <plugin filename="ign_ros2_control-system" name="ign_ros2_control::IgnitionROS2ControlPlugin">
+            <parameters>$(find sirius_controller)/config/sirius_controllers.yaml</parameters>
+        </plugin>
+        </xacro:if>
+
+        <!-- ROS 2 Iron or above -->
+        <xacro:unless value="$(arg is_ignition)">
+        <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+            <parameters>$(find sirius_controller)/config/sirius_controllers.yaml</parameters>
+        </plugin>
+        </xacro:unless>
+    </gazebo>
+</robot>

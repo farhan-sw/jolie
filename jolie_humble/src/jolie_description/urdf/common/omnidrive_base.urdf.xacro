@@ -1,0 +1,48 @@
+<robot xmlns:xacro="https://www.ros.org/wiki/xacro">
+
+    <!-- ros2_control -->
+    <!-- <xacro:macro name="ros2_control_wheel_joint" params="suffix">
+        <joint name="wheel${suffix}_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+    </xacro:macro> -->
+
+    <!-- This macro creates 3/4 omnidrive wheel to a base/chassis (parent_link) -->
+    <xacro:macro name="omni_wheel_to_base" params="wheel_count parent_link">
+        <xacro:if value="${wheel_count == 3}">
+            <xacro:wheel parent="${parent_link}" suffix="1" theta="${PI}"/>
+            <xacro:wheel parent="${parent_link}" suffix="2" theta="-${PI/3}"/>
+            <xacro:wheel parent="${parent_link}" suffix="3" theta="${PI/3}"/>
+
+            <!-- <ros2_control name="GazeboSystem" type="system">
+                <hardware>
+                    <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+                </hardware>
+                <xacro:ros2_control_wheel_joint suffix="1"/>
+                <xacro:ros2_control_wheel_joint suffix="2"/>
+                <xacro:ros2_control_wheel_joint suffix="3"/>
+            </ros2_control> -->
+        </xacro:if>
+        <xacro:if value="${wheel_count == 4}">
+            <xacro:wheel parent="${parent_link}" suffix="1" theta="${PI/4}"/>
+            <xacro:wheel parent="${parent_link}" suffix="2" theta="-${PI/4}"/>
+            <xacro:wheel parent="${parent_link}" suffix="3" theta="${3*PI/4}"/>
+            <xacro:wheel parent="${parent_link}" suffix="4" theta="-${3*PI/4}"/>
+
+            <!-- <ros2_control name="GazeboSystem" type="system">
+                <hardware>
+                    <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+                </hardware>
+                <xacro:ros2_control_wheel_joint suffix="1"/>
+                <xacro:ros2_control_wheel_joint suffix="2"/>
+                <xacro:ros2_control_wheel_joint suffix="3"/>
+                <xacro:ros2_control_wheel_joint suffix="4"/>
+            </ros2_control> -->
+        </xacro:if>
+    </xacro:macro>
+</robot>

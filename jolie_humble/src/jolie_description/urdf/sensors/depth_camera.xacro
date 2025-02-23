@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<!--
+[depth_camera.urdf.xacro]
+General depth camera xacro file. Modified to be a xacro macro.
+Reference: 
+- https://classic.gazebosim.org/tutorials?tut=ros_gzplugins (Main Reference)
+- https://articulatedrobotics.xyz/tutorials/mobile-robot/hardware/camera
+- https://robotics.stackexchange.com/questions/50722/how-to-use-libgazebo-ros-camera-so-in-gazebo-urdf
+
+xacro macro: <xacro:macro name="add_depth_camera" params="...">...</xacro:macro>
+This macro will add a depth camera. Attach the <prefix>_link to your robot with joint.
+-->
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Macro: realsense_depth_camera -->
+    <xacro:macro name="add_depth_camera" params="
+        prefix:='depth_camera' 
+        camera_name:='camera'
+        update_rate:=20.0
+        horizontal_fov:=1.047
+        image_format:='R8G8B8' 
+        image_width:=640
+        image_height:=480 
+        min_dist:=0.5
+        max_dist:=8.0 
+        visual_box_size:='0.249 0.066 0.067'
+        visual_material:='black'
+    ">
+        <!-- Camera link -->
+        <link name="${prefix}_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="${visual_box_size}"/>
+                </geometry>
+                <material name="${visual_material}"/>
+            </visual>
+        </link>
+
+        <!-- Camera link to optical frame link-->
+        <joint name="${prefix}_optical_joint" type="fixed">
+            <parent link="${prefix}_link"/>
+            <child link="${prefix}_link_optical"/>
+            <origin xyz="0 0 0" rpy="${-3.1415/2} 0 ${-3.1415/2}"/>
+        </joint>
+
+        <!-- Optical frame link -->
+        <link name="${prefix}_link_optical"/>
+
+        <!-- Gazebo sensor definition -->
+        <gazebo reference="${prefix}_link">
+            <material>Gazebo/Red</material>
+
+            <sensor name="${prefix}_sensor" type="depth">
+                <pose>0 0 0 0 0 0</pose>
+                <visualize>true</visualize>
+                <update_rate>${update_rate}</update_rate>
+                <camera>
+                    <horizontal_fov>${horizontal_fov}</horizontal_fov>
+                    <image>
+                        <format>${image_format}</format>
+                        <width>${image_width}</width>
+                        <height>${image_height}</height>
+                    </image>
+                    <clip>
+                        <near>${min_dist}</near>
+                        <far>${max_dist}</far>
+                    </clip>
+                </camera>
+                <plugin name="${prefix}_controller" filename="libgazebo_ros_camera.so">
+                    <frameName>${prefix}_link_optical</frameName>
+
+                    <baseline>0.2</baseline>
+                    <alwaysOn>true</alwaysOn>
+                    <updateRate>${update_rate}</updateRate>
+
+                    <cameraName>${camera_name}</cameraName>
+                    <imageTopicName>/${camera_name}/color/image_raw</imageTopicName>
+                    <depthImageTopicName>/${camera_name}/depth/image_raw</depthImageTopicName>
+                    <cameraInfoTopicName>/${camera_name}/color/camera_info</cameraInfoTopicName>
+                    <depthImageInfoTopicName>/${camera_name}/depth/camera_info</depthImageInfoTopicName>
+                    <pointCloudTopicName>/${camera_name}/depth/points</pointCloudTopicName>
+
+                    <pointCloudCutoff>${min_dist}</pointCloudCutoff>
+                    <pointCloudCutoffMax>${max_dist}</pointCloudCutoffMax>
+
+                    <distortionK1>0.0</distortionK1>
+                    <distortionK2>0.0</distortionK2>
+                    <distortionK3>0.0</distortionK3>
+                    <distortionT1>0.0</distortionT1>
+                    <distortionT2>0.0</distortionT2>
+                    <CxPrime>0</CxPrime>
+                    <focalLength>525</focalLength>
+                    <hackBaseline>0.2</hackBaseline>
+
+                </plugin>
+            </sensor>
+        </gazebo>
+    </xacro:macro>
+</robot>

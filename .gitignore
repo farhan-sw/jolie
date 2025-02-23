@@ -35,3 +35,8 @@
 *.exe
 *.out
 *.app
+
+# Exclude build, log, and install directories
+build/
+log/
+install/

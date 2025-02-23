@@ -1,0 +1,27 @@
+<!--
+[materials.xacro]
+Defines some materials.
+-->
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="material">
+    <material name="white">
+        <color rgba="1.0 1.0 1.0 1.0"/>
+    </material>
+
+    <material name="light_grey">
+        <color rgba="0.8 0.8 0.8 1.0"/>
+    </material>
+
+    <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+    </material>
+
+    <material name="light_brown">
+        <color rgba="0.8 0.6 0.4 1.0"/>
+    </material>
+
+    <material name="red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+    </material>
+
+</robot>
