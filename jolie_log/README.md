@@ -13,6 +13,8 @@ This file contains the date logs for each development progress. It contains the 
     docker pull microros/micro-ros-agent:humble
 
     docker run -it --rm --net=host --device=/dev/ttyUSB0 microros/micro-ros-agent:humble serial --dev /dev/ttyUSB0
+
+    docker run -it --rm --net=host --device=/dev/ttyACM0 microros/micro-ros-agent:humble serial --dev /dev/ttyACM0
     ```
 - **Issues**: 
     - The device is not general, if the device port changes, the docker command will not work. Need to find a way to make it general. e.g. /dev/ttyUSB0 -> esp32_base
