@@ -14,7 +14,14 @@ def generate_launch_description():
         description='Type of controller to use: simple or omniwheel'
     )
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Use simulation (Gazebo) clock if true'
+    )
+
     controller_type = LaunchConfiguration('controller_type')
+    use_sim_time = LaunchConfiguration('use_sim_time')
 
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
@@ -24,6 +31,7 @@ def generate_launch_description():
             "--controller-manager",
             "controller_manager",
         ],
+        parameters=[{'use_sim_time': use_sim_time}]
     )
 
     simple_controller = Node(
@@ -33,7 +41,8 @@ def generate_launch_description():
                 "--controller-manager",
                 "controller_manager"
         ],
-        condition=IfCondition(PythonExpression(["'", controller_type, "' == 'simple'"]))
+        condition=IfCondition(PythonExpression(["'", controller_type, "' == 'simple'"])),
+        parameters=[{'use_sim_time': use_sim_time}]
     )
     
     omniwheel_controller = Node(
@@ -44,12 +53,14 @@ def generate_launch_description():
             "--controller-manager",
             "controller_manager",
         ],
-        condition=IfCondition(PythonExpression(["'", controller_type, "' == 'omniwheel'"]))
+        condition=IfCondition(PythonExpression(["'", controller_type, "' == 'omniwheel'"])),
+        parameters=[{'use_sim_time': use_sim_time}]
     )
     
     return LaunchDescription(
         [
             controller_type_arg,
+            use_sim_time_arg,
             joint_state_broadcaster_spawner,
             simple_controller,
             omniwheel_controller

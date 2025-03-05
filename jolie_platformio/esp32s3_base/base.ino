@@ -15,6 +15,16 @@
 #include <rclc/executor.h>
 #include <std_msgs/msg/float32.h>
 
+#define base_pub_front_left_topic "velocity_fl"
+#define base_pub_front_right_topic "velocity_fr"
+#define base_pub_back_left_topic "velocity_bl"
+#define base_pub_back_right_topic "velocity_br"
+#define base_sub_front_left_topic "target_velocity_fl"
+#define base_sub_front_right_topic "target_velocity_fr"
+#define base_sub_back_left_topic "target_velocity_bl"
+#define base_sub_back_right_topic "target_velocity_br"
+
+
 float velFL, velFR, velBL, velBR;
 float FirVelFL, FirVelFR, FirVelBL, FirVelBR;
 float omegaFL, omegaFR, omegaBL, omegaBR;
@@ -238,19 +248,19 @@ void setup() {
   RCCHECK(rclc_publisher_init_default(
     &publisher_fl, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "velocity_fl"));
+    base_pub_front_left_topic));
   RCCHECK(rclc_publisher_init_default(
     &publisher_fr, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "velocity_fr"));
+    base_pub_front_right_topic));
   RCCHECK(rclc_publisher_init_default(
     &publisher_bl, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "velocity_bl"));
+    base_pub_back_left_topic));
   RCCHECK(rclc_publisher_init_default(
     &publisher_br, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "velocity_br"));
+    base_pub_back_right_topic));
 
   // Initialize measured velocity messages to 0.0f
   msg_fl.data = 0.0f;
@@ -262,19 +272,19 @@ void setup() {
   RCCHECK(rclc_subscription_init_default(
     &subscriber_fl, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "target_velocity_fl"));
+    base_sub_front_left_topic));
   RCCHECK(rclc_subscription_init_default(
     &subscriber_fr, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "target_velocity_fr"));
+    base_sub_front_right_topic));
   RCCHECK(rclc_subscription_init_default(
     &subscriber_bl, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "target_velocity_bl"));
+    base_sub_back_left_topic));
   RCCHECK(rclc_subscription_init_default(
     &subscriber_br, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    "target_velocity_br"));
+    base_sub_back_right_topic));
 
   // Initialize target message placeholders
   target_msg_fl.data = 0.0f;
