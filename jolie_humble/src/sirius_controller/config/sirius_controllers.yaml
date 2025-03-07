@@ -31,8 +31,8 @@ omni_wheel_controller:
     omni_wheel_names  : ['wheel1_joint', 'wheel2_joint', 'wheel3_joint', 'wheel4_joint']
     omni_wheel_angle  : [0.785398, -0.785398, 2.356194, -2.356194]
 
-    omni_wheel_distance : 0.49
-    wheel_radius : 0.05
+    omni_wheel_distance : 0.115
+    wheel_radius : 0.028
 
     odom_frame_id: odom
     base_frame_id: base_link

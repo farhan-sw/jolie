@@ -26,16 +26,16 @@ def generate_launch_description():
         )
     )
     
-    # joystick = IncludeLaunchDescription(
-    #     launch_description_source=os.path.join(
-    #         get_package_share_directory("sirius_controller"), 
-    #         "launch", 
-    #         "joystick_teleop.launch.py"
-    #     )
-    # )
+    joystick = IncludeLaunchDescription(
+        launch_description_source=os.path.join(
+            get_package_share_directory("sirius_controller"), 
+            "launch", 
+            "joystick_teleop.launch.py"
+        )
+    )
         
     return LaunchDescription([
         hardware_interface,
         controller,
-        # joystick,
+        joystick,
     ])

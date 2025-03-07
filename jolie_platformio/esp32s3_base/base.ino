@@ -1,142 +1,211 @@
 #include <Arduino.h>
 #include <FreeRTOS.h>
 #include <task.h>
+#include <semphr.h>         // Untuk mutex
 #include <ESP32Encoder.h>
 #include <Motor.h>
 #include <ConfigPin.h>
 #include <OmniBase.h>
 #include <FIR.h>
 #include <MiniPID.h>
-
 #include <stdio.h>
+
+// micro-ROS header (hanya digunakan jika isDebug == false)
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <std_msgs/msg/float32.h>
 
-#define base_pub_front_left_topic "velocity_fl"
-#define base_pub_front_right_topic "velocity_fr"
-#define base_pub_back_left_topic "velocity_bl"
-#define base_pub_back_right_topic "velocity_br"
-#define base_sub_front_left_topic "target_velocity_fl"
-#define base_sub_front_right_topic "target_velocity_fr"
-#define base_sub_back_left_topic "target_velocity_bl"
-#define base_sub_back_right_topic "target_velocity_br"
+//=========================================
+// Konfigurasi Global & Mode Debug
+//=========================================
+bool isDebug = false; // false: Mode ROS (tanpa Serial.print), true: Mode Debug (dengan Serial.print)
+bool sendInRad = true; // true: kirim nilai omega (rad/s), false: kirim kecepatan linear (m/s)
+const float wheelRadius = 0.05; // Faktor konversi, misalnya 5 cm
 
+// Gunakan LED hanya pada mode debug (untuk menghindari konflik di ROS mode)
+#ifndef DEBUG_LED_PIN
+  #ifdef LED_BUILTIN
+    #define DEBUG_LED_PIN LED_BUILTIN
+  #else
+    #define DEBUG_LED_PIN 13
+  #endif
+#endif
 
+//=========================================
+// Definisi Topic untuk ROS
+//=========================================
+#define BASE_PUB_FRONT_LEFT_TOPIC "velocity_fl"
+#define BASE_PUB_FRONT_RIGHT_TOPIC "velocity_fr"
+#define BASE_PUB_BACK_LEFT_TOPIC "velocity_bl"
+#define BASE_PUB_BACK_RIGHT_TOPIC "velocity_br"
+
+#define BASE_SUB_FRONT_LEFT_TOPIC "target_velocity_fl"
+#define BASE_SUB_FRONT_RIGHT_TOPIC "target_velocity_fr"
+#define BASE_SUB_BACK_LEFT_TOPIC "target_velocity_bl"
+#define BASE_SUB_BACK_RIGHT_TOPIC "target_velocity_br"
+
+//=========================================
+// Variabel untuk Feedback dan Pengolahan
+//=========================================
 float velFL, velFR, velBL, velBR;
-float FirVelFL, FirVelFR, FirVelBL, FirVelBR;
 float omegaFL, omegaFR, omegaBL, omegaBR;
+
+// Hasil FIR filter
+float FirVelFL, FirVelFR, FirVelBL, FirVelBR;
 float FirOmegaFL, FirOmegaFR, FirOmegaBL, FirOmegaBR;
 
-/* ===================================================================================================== */
-/* ====================================== SETUP FOR MICRO-ROS ========================================== */
+//=========================================
+// Variabel Global untuk Komunikasi ROS
+//=========================================
+#if !isDebug
+rcl_publisher_t publisher_fl, publisher_fr, publisher_bl, publisher_br;
+std_msgs__msg__Float32 msg_fl, msg_fr, msg_bl, msg_br;
+rcl_subscription_t subscriber_fl, subscriber_fr, subscriber_bl, subscriber_br;
+std_msgs__msg__Float32 target_msg_fl, target_msg_fr, target_msg_bl, target_msg_br;
+#endif
 
-// Publishers for measured velocities
-rcl_publisher_t publisher_fl;
-rcl_publisher_t publisher_fr;
-rcl_publisher_t publisher_bl;
-rcl_publisher_t publisher_br;
+// Global target kecepatan dengan proteksi mutex
+float target_fl = 0.0f, target_fr = 0.0f, target_bl = 0.0f, target_br = 0.0f;
+SemaphoreHandle_t targetMutex = NULL;
 
-std_msgs__msg__Float32 msg_fl;
-std_msgs__msg__Float32 msg_fr;
-std_msgs__msg__Float32 msg_bl;
-std_msgs__msg__Float32 msg_br;
-
-// Subscribers for target velocities
-rcl_subscription_t subscriber_fl;
-rcl_subscription_t subscriber_fr;
-rcl_subscription_t subscriber_bl;
-rcl_subscription_t subscriber_br;
-
-std_msgs__msg__Float32 target_msg_fl;
-std_msgs__msg__Float32 target_msg_fr;
-std_msgs__msg__Float32 target_msg_bl;
-std_msgs__msg__Float32 target_msg_br;
-
-// Global variables to store target values
-float target_fl = 0.0f;
-float target_fr = 0.0f;
-float target_bl = 0.0f;
-float target_br = 0.0f;
-
+#if !isDebug
 rclc_executor_t executor;
 rclc_support_t support;
 rcl_allocator_t allocator;
 rcl_node_t node;
 rcl_timer_t timer;
-
-#ifdef LED_BUILTIN
-  #define LED_PIN LED_BUILTIN
-#else
-  #define LED_PIN 13
 #endif
 
-#define RCCHECK(fn) { rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){ error_loop(); } }
-#define RCSOFTCHECK(fn) { rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){} }
+//=========================================
+// Helper Macro untuk Error Checking (ROS mode tanpa Serial Print)
+//=========================================
+#if !isDebug
+uint32_t rclPublishErrorCount = 0;
+#define RCCHECK(fn) { \
+  rcl_ret_t temp_rc = fn; \
+  if(temp_rc != RCL_RET_OK){ \
+    error_loop(); \
+  } \
+}
+#define RCSOFTCHECK(fn) { \
+  rcl_ret_t temp_rc = fn; \
+  if(temp_rc != RCL_RET_OK){ \
+    rclPublishErrorCount++; \
+    if(rclPublishErrorCount % 100 == 0){ \
+      /* Tidak mencetak output */ \
+    } \
+  } \
+}
+#else
+#define RCCHECK(fn) { \
+  rcl_ret_t temp_rc = fn; \
+  if(temp_rc != RCL_RET_OK){ \
+    Serial.print("Error at "); Serial.println(#fn); \
+    error_loop(); \
+  } \
+}
+#define RCSOFTCHECK(fn) { \
+  rcl_ret_t temp_rc = fn; \
+  if(temp_rc != RCL_RET_OK){ \
+    Serial.print("Soft Error at "); Serial.println(#fn); \
+  } \
+}
+#endif
 
+//=========================================
+// Error Handler (tanpa Serial Print pada ROS mode)
+//=========================================
 void error_loop(){
-  while(1){
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    delay(100);
-  }
+  #if !isDebug
+    while(1){
+      delay(100);
+    }
+  #else
+    Serial.println("Critical error encountered. Halting execution.");
+    while(1){
+      digitalWrite(DEBUG_LED_PIN, !digitalRead(DEBUG_LED_PIN));
+      delay(100);
+    }
+  #endif
 }
 
-// Timer callback: publish measured velocities (here for demonstration we simply increment each value by 0.1)
+//=========================================
+// Timer Callback untuk Publikasi (20ms)
+//=========================================
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 {
-  RCLC_UNUSED(last_call_time);
-  if (timer != NULL) {
-    msg_fl.data = FirVelFL;
-    msg_fr.data = FirVelFR;
-    msg_bl.data = FirVelBL;
-    msg_br.data = FirVelBR;
+  (void) last_call_time;
+  #if !isDebug
+    if(timer != NULL){
+      if(sendInRad){
+        msg_fl.data = FirOmegaFL;
+        msg_fr.data = FirOmegaFR;
+        msg_bl.data = FirOmegaBL;
+        msg_br.data = FirOmegaBR;
+      } else {
+        msg_fl.data = FirVelFL;
+        msg_fr.data = FirVelFR;
+        msg_bl.data = FirVelBL;
+        msg_br.data = FirVelBR;
+      }
+      RCSOFTCHECK(rcl_publish(&publisher_fl, &msg_fl, NULL));
+      RCSOFTCHECK(rcl_publish(&publisher_fr, &msg_fr, NULL));
+      RCSOFTCHECK(rcl_publish(&publisher_bl, &msg_bl, NULL));
+      RCSOFTCHECK(rcl_publish(&publisher_br, &msg_br, NULL));
+    }
+  #else
+    Serial.print("Feedback: ");
+    if(sendInRad){
+      Serial.print("Omega FL: "); Serial.print(FirOmegaFL, 3);
+      Serial.print(" Omega FR: "); Serial.print(FirOmegaFR, 3);
+      Serial.print(" Omega BL: "); Serial.print(FirOmegaBL, 3);
+      Serial.print(" Omega BR: "); Serial.println(FirOmegaBR, 3);
+    } else {
+      Serial.print("Vel FL: "); Serial.print(FirVelFL, 3);
+      Serial.print(" Vel FR: "); Serial.print(FirVelFR, 3);
+      Serial.print(" Vel BL: "); Serial.print(FirVelBL, 3);
+      Serial.print(" Vel BR: "); Serial.println(FirVelBR, 3);
+    }
+  #endif
+}
 
-    RCSOFTCHECK(rcl_publish(&publisher_fl, &msg_fl, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_fr, &msg_fr, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_bl, &msg_bl, NULL));
-    RCSOFTCHECK(rcl_publish(&publisher_br, &msg_br, NULL));
+//=========================================
+// Subscription Callback untuk Update Target
+//=========================================
+void target_subscription_callback_fl(const void * msgin) {
+  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+    target_fl = incoming->data;
+    xSemaphoreGive(targetMutex);
+  }
+}
+void target_subscription_callback_fr(const void * msgin) {
+  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+    target_fr = incoming->data;
+    xSemaphoreGive(targetMutex);
+  }
+}
+void target_subscription_callback_bl(const void * msgin) {
+  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+    target_bl = incoming->data;
+    xSemaphoreGive(targetMutex);
+  }
+}
+void target_subscription_callback_br(const void * msgin) {
+  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+    target_br = incoming->data;
+    xSemaphoreGive(targetMutex);
   }
 }
 
-// Subscription callback for front-left target velocity:
-// If the received target is nonzero, turn LED on; otherwise, turn it off.
-void target_subscription_callback_fl(const void * msgin)
-{
-  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
-  target_fl = incoming->data;
-}
-
-// Other subscription callbacks simply update the global target values
-void target_subscription_callback_fr(const void * msgin)
-{
-  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
-  target_fr = incoming->data;
-}
-
-void target_subscription_callback_bl(const void * msgin)
-{
-  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
-  target_bl = incoming->data;
-}
-
-void target_subscription_callback_br(const void * msgin)
-{
-  const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
-  target_br = incoming->data;
-}
-
-/* ====================================== END SETUP FOR MICRO-ROS ====================================== */
-/* ===================================================================================================== */
-
-
-
-
-/* ====================================== SETUP FOR OMNIBASE ========================================== */
-/* ===================================================================================================== */
-
-// Define encoders and motors
+//=========================================
+// Setup OmniBase, PID, dan FIR Filter
+//=========================================
 ESP32Encoder enc_FL;
 ESP32Encoder enc_FR;
 ESP32Encoder enc_BL;
@@ -147,186 +216,194 @@ Motor motorFL(MTR2_EN, MTR2_LPWM, MTR2_RPWM);
 Motor motorBR(MTR3_EN, MTR3_LPWM, MTR3_RPWM);
 Motor motorBL(MTR4_EN, MTR4_LPWM, MTR4_RPWM);
 
-CalculateEncoder calc_FL(0.1, 200);
-CalculateEncoder calc_FR(0.1, 200);
-CalculateEncoder calc_BL(0.1, 200);
-CalculateEncoder calc_BR(0.1, 200);
+CalculateEncoder calc_FL(0.056, 213);
+CalculateEncoder calc_FR(0.056, 213);
+CalculateEncoder calc_BL(0.056, 213);
+CalculateEncoder calc_BR(0.056, 213);
 
-// Create an instance of OmniBase
-OmniBase omniBase(enc_FL, enc_FR, enc_BL, enc_BR, calc_FL, calc_FR, calc_BL, calc_BR, motorFL, motorFR, motorBL, motorBR);
+OmniBase omniBase(enc_FL, enc_FR, enc_BL, enc_BR,
+                  calc_FL, calc_FR, calc_BL, calc_BR,
+                  motorFL, motorFR, motorBL, motorBR);
 
-// Definisi koefisien FIR (hasil desain dari MATLAB)
+// Koefisien FIR (hasil desain MATLAB)
 float firCoefficients[] = {0.0082, 0.0410, 0.1196, 0.2107, 0.2605, 0.2107, 0.1196, 0.0410, 0.0082};
-int firOrder = 8; // Orde FIR (jumlah koefisien - 1)
-
-// Inisialisasi objek FIRFilter
+int firOrder = 8;
 FIR firFL(firOrder, firCoefficients);
 FIR firFR(firOrder, firCoefficients);
 FIR firBL(firOrder, firCoefficients);
 FIR firBR(firOrder, firCoefficients);
 
-// Variabel untuk interaktif
-float setpoint = 10.2; // Setpoint awal
-float kp = 0.005; // Kp awal
-float ki = 0.01; // Ki awal
-float kd = 0.0; // Kd awal
-
+// Konstanta PID (tuning lebih lanjut diperlukan)
+float kp = 0.005, ki = 0.001, kd = 0.0;
 MiniPID pidFL(kp, ki, kd);
 MiniPID pidFR(kp, ki, kd);
 MiniPID pidBL(kp, ki, kd);
 MiniPID pidBR(kp, ki, kd);
 
-// Variabel Interval dalam ms untuk setiap task
-const int updateMotorVelocityInterval = 10; // Interval untuk updateMotorVelocity dalam ms
+// Interval update motor: 10 ms (agar data selalu segar)
+const int updateMotorVelocityInterval = 10;
 
-
+//=========================================
+// Task Update Motor Velocity (Pinned ke Core 1, Stack 4096)
+//=========================================
 void updateMotorVelocity(void *parameter) {
+  (void) parameter;
   TickType_t lastWakeTime = xTaskGetTickCount();
-  while (true) {
-      // Calculate velocities
-      omniBase.calculate(velFL, velFR, velBL, velBR, omegaFL, omegaFR, omegaBL, omegaBR);
-
-      // Filter using FIR
-      // FirOmegaFL = firFL.process(omegaFL);
-      // FirOmegaFR = firFR.process(omegaFR);
-      // FirOmegaBL = firBL.process(omegaBL);
-      // FirOmegaBR = firBR.process(omegaBR);
-
-      FirVelBL = firBL.process(velBL);
-      FirVelBR = firBR.process(velBR);
+  float local_target_fl, local_target_fr, local_target_bl, local_target_br;
+  
+  while(true) {
+    // Hitung kecepatan linear dan omega (m/s dan rad/s)
+    omniBase.calculate(velFL, velFR, velBL, velBR, omegaFL, omegaFR, omegaBL, omegaBR);
+    
+    // Terapkan FIR filter sesuai pilihan unit
+    if(sendInRad) {
+      FirOmegaFL = firFL.process(omegaFL);
+      FirOmegaFR = firFR.process(omegaFR);
+      FirOmegaBL = firBL.process(omegaBL);
+      FirOmegaBR = firBR.process(omegaBR);
+    } else {
       FirVelFL = firFL.process(velFL);
       FirVelFR = firFR.process(velFR);
-
-      // Update motor speeds using PID
-      // omniBase.setMotorSpeeds(
-      //     pidFL.getOutput(FirOmegaFL, target_fl),
-      //     pidFR.getOutput(FirOmegaFR, target_fr),
-      //     pidBL.getOutput(FirOmegaBL, target_bl),
-      //     pidBR.getOutput(FirOmegaBR, target_br)
-      // );
-      omniBase.setMotorSpeeds(
-          pidFL.getOutput(FirVelFL, target_fl),
-          pidFR.getOutput(FirVelFR, target_fr),
-          pidBL.getOutput(FirVelBL, target_bl),
-          pidBR.getOutput(FirVelBR, target_br)
-      );
-
-      // Maintain a consistent sampling interval
-      vTaskDelayUntil(&lastWakeTime, updateMotorVelocityInterval / portTICK_PERIOD_MS);
+      FirVelBL = firBL.process(velBL);
+      FirVelBR = firBR.process(velBR);
+    }
+    
+    // Ambil target dengan proteksi mutex
+    if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+      local_target_fl = target_fl;
+      local_target_fr = target_fr;
+      local_target_bl = target_bl;
+      local_target_br = target_br;
+      xSemaphoreGive(targetMutex);
+    }
+    
+    // Hitung output PID (pastikan konsistensi satuan)
+    float out_fl, out_fr, out_bl, out_br;
+    if(sendInRad) {
+      out_fl = pidFL.getOutput(FirOmegaFL, local_target_fl);
+      out_fr = pidFR.getOutput(FirOmegaFR, local_target_fr);
+      out_bl = pidBL.getOutput(FirOmegaBL, local_target_bl);
+      out_br = pidBR.getOutput(FirOmegaBR, local_target_br);
+    } else {
+      out_fl = pidFL.getOutput(FirVelFL, local_target_fl);
+      out_fr = pidFR.getOutput(FirVelFR, local_target_fr);
+      out_bl = pidBL.getOutput(FirVelBL, local_target_bl);
+      out_br = pidBR.getOutput(FirVelBR, local_target_br);
+    }
+    
+    omniBase.setMotorSpeeds(out_fl, out_fr, out_bl, out_br);
+    
+    vTaskDelayUntil(&lastWakeTime, updateMotorVelocityInterval / portTICK_PERIOD_MS);
   }
 }
 
-/* ====================================== END SETUP FOR OMNIBASE ====================================== */ 
-/* ===================================================================================================== */
+//=========================================
+// Task ROS Executor (Pinned ke Core 0, Stack 2048, Prioritas 3)
+//=========================================
+void rosExecutorTask(void *parameter) {
+  (void) parameter;
+  const TickType_t executorDelay = 5;
+  while(true) {
+    #if !isDebug
+      rcl_ret_t spin_ret = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+      if(spin_ret != RCL_RET_OK){
+        // Tanpa output Serial pada ROS mode
+      }
+    #endif
+    vTaskDelay(executorDelay / portTICK_PERIOD_MS);
+  }
+}
 
+#if isDebug
+//=========================================
+// Task Monitoring Resource (hanya aktif pada mode debug, Pinned ke Core 0)
+//=========================================
+void monitorResourcesTask(void *parameter) {
+  (void) parameter;
+  while(true) {
+    UBaseType_t freeStack = uxTaskGetStackHighWaterMark(NULL);
+    Serial.print("Free Stack: ");
+    Serial.println(freeStack);
+    vTaskDelay(10000 / portTICK_PERIOD_MS); // Cek setiap 10 detik
+  }
+}
+#endif
 
-
-
-
+//=========================================
+// Setup Fungsi Utama
+//=========================================
 void setup() {
-
-  /* ===================================================================================================== */
-  /* ====================================== GENERAL SETUP =============================================== */
-
-  /* ====================================== END GENERAL SETUP =========================================== */
-  /* ===================================================================================================== */
-
-
-
-  /* ===================================================================================================== */
-  /* ====================================== SETUP FOR MICRO-ROS ========================================== */
-
-  // Initialize micro-ROS transports (ensure set_microros_transports() is configured appropriately)
-  set_microros_transports();
-  delay(2000);
-
-  allocator = rcl_get_default_allocator();
-  RCCHECK(rclc_support_init(&support, 0, NULL, &allocator));
-  RCCHECK(rclc_node_init_default(&node, "micro_ros_arduino_node", "", &support));
-
-  // Create publishers for measured velocities on four topics
-  RCCHECK(rclc_publisher_init_default(
-    &publisher_fl, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_pub_front_left_topic));
-  RCCHECK(rclc_publisher_init_default(
-    &publisher_fr, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_pub_front_right_topic));
-  RCCHECK(rclc_publisher_init_default(
-    &publisher_bl, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_pub_back_left_topic));
-  RCCHECK(rclc_publisher_init_default(
-    &publisher_br, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_pub_back_right_topic));
-
-  // Initialize measured velocity messages to 0.0f
-  msg_fl.data = 0.0f;
-  msg_fr.data = 0.0f;
-  msg_bl.data = 0.0f;
-  msg_br.data = 0.0f;
-
-  // Create subscriptions for target velocities on four topics
-  RCCHECK(rclc_subscription_init_default(
-    &subscriber_fl, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_sub_front_left_topic));
-  RCCHECK(rclc_subscription_init_default(
-    &subscriber_fr, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_sub_front_right_topic));
-  RCCHECK(rclc_subscription_init_default(
-    &subscriber_bl, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_sub_back_left_topic));
-  RCCHECK(rclc_subscription_init_default(
-    &subscriber_br, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
-    base_sub_back_right_topic));
-
-  // Initialize target message placeholders
-  target_msg_fl.data = 0.0f;
-  target_msg_fr.data = 0.0f;
-  target_msg_bl.data = 0.0f;
-  target_msg_br.data = 0.0f;
-
-  // Create a timer to publish measured velocities every 100ms
-  const unsigned int timer_timeout = 10;
-  RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(timer_timeout), timer_callback));
-
-  // Create executor with capacity for 1 timer + 4 subscriptions = 5 handles
-  RCCHECK(rclc_executor_init(&executor, &support.context, 5, &allocator));
-  RCCHECK(rclc_executor_add_timer(&executor, &timer));
-  RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fl, &target_msg_fl, target_subscription_callback_fl, ON_NEW_DATA));
-  RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fr, &target_msg_fr, target_subscription_callback_fr, ON_NEW_DATA));
-  RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_bl, &target_msg_bl, target_subscription_callback_bl, ON_NEW_DATA));
-  RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_br, &target_msg_br, target_subscription_callback_br, ON_NEW_DATA));
-
-  /* ====================================== END SETUP FOR MICRO-ROS ====================================== */
-  /* ===================================================================================================== */
-
+  if(isDebug) {
+    Serial.begin(115200);
+    pinMode(DEBUG_LED_PIN, OUTPUT);
+    digitalWrite(DEBUG_LED_PIN, LOW);
+  }
   
-  /* ===================================================================================================== */
-  /* ====================================== SETUP FOR OMNIBASE ========================================== */
-  // Initialize OmniBase
+  targetMutex = xSemaphoreCreateMutex();
+  if(targetMutex == NULL){
+    if(isDebug) { Serial.println("Failed to create mutex!"); }
+    error_loop();
+  }
+  
+  if(!isDebug) {
+    set_microros_transports();
+    delay(2000);
+    
+    allocator = rcl_get_default_allocator();
+    RCCHECK(rclc_support_init(&support, 0, NULL, &allocator));
+    RCCHECK(rclc_node_init_default(&node, "micro_ros_arduino_node", "", &support));
+    
+    RCCHECK(rclc_publisher_init_default(&publisher_fl, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_PUB_FRONT_LEFT_TOPIC));
+    RCCHECK(rclc_publisher_init_default(&publisher_fr, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_PUB_FRONT_RIGHT_TOPIC));
+    RCCHECK(rclc_publisher_init_default(&publisher_bl, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_PUB_BACK_LEFT_TOPIC));
+    RCCHECK(rclc_publisher_init_default(&publisher_br, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_PUB_BACK_RIGHT_TOPIC));
+    
+    msg_fl.data = msg_fr.data = msg_bl.data = msg_br.data = 0.0f;
+    
+    RCCHECK(rclc_subscription_init_default(&subscriber_fl, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_FRONT_LEFT_TOPIC));
+    RCCHECK(rclc_subscription_init_default(&subscriber_fr, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_FRONT_RIGHT_TOPIC));
+    RCCHECK(rclc_subscription_init_default(&subscriber_bl, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_BACK_LEFT_TOPIC));
+    RCCHECK(rclc_subscription_init_default(&subscriber_br, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_BACK_RIGHT_TOPIC));
+    
+    target_msg_fl.data = target_msg_fr.data = target_msg_bl.data = target_msg_br.data = 0.0f;
+    
+    const unsigned int timer_timeout_ms = 20;
+    RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(timer_timeout_ms), timer_callback));
+    
+    RCCHECK(rclc_executor_init(&executor, &support.context, 5, &allocator));
+    RCCHECK(rclc_executor_add_timer(&executor, &timer));
+    RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fl, &target_msg_fl, target_subscription_callback_fl, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fr, &target_msg_fr, target_subscription_callback_fr, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_bl, &target_msg_bl, target_subscription_callback_bl, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_br, &target_msg_br, target_subscription_callback_br, ON_NEW_DATA));
+  }
+  
   omniBase.setup(ENCA_1, ENCB_1, ENCA_2, ENCB_2, ENCA_3, ENCB_3, ENCA_4, ENCB_4);
-
-  // Set PID output limits
   pidFL.setOutputLimits(-1, 1);
   pidFR.setOutputLimits(-1, 1);
   pidBL.setOutputLimits(-1, 1);
   pidBR.setOutputLimits(-1, 1);
-
-  // Create tasks
-  xTaskCreate(updateMotorVelocity, "Update Motor Velocity", 2048, NULL, 0, NULL);
-
-  /* ====================================== END SETUP FOR OMNIBASE ====================================== */
-  /* ===================================================================================================== */
-
+  
+  // Buat task update motor, pinned ke Core 1 dengan stack 4096 dan prioritas 1
+  xTaskCreatePinnedToCore(updateMotorVelocity, "Update Motor Velocity", 4096, NULL, 1, NULL, 1);
+  // Buat task ROS executor, pinned ke Core 0 dengan stack 2048 dan prioritas 3
+  if(!isDebug) {
+    xTaskCreatePinnedToCore(rosExecutorTask, "ROS Executor Task", 2048, NULL, 3, NULL, 0);
+  }
+  // Task monitoring resource hanya aktif di mode debug, pinned ke Core 0
+  #if isDebug
+    xTaskCreatePinnedToCore(monitorResourcesTask, "Monitor Resources", 2048, NULL, 2, NULL, 0);
+  #endif
 }
 
 void loop() {
-  RCCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)));
+  delay(10);
 }
