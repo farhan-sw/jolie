@@ -245,7 +245,7 @@ namespace jolie_firmware
     void JolieBaseInterface::from_base_callback_front_left(const std_msgs::msg::Float32::SharedPtr msg)
     {
         auto dt = (rclcpp::Clock().now() - last_run_front_left_).seconds();
-        velocity_state_.at(0) = msg->data;
+        velocity_state_.at(0) = (-1) * msg->data;
         position_state_.at(0) += velocity_state_.at(0) * dt;
         last_run_front_left_ = rclcpp::Clock().now();
     }
@@ -253,7 +253,7 @@ namespace jolie_firmware
     void JolieBaseInterface::from_base_callback_front_right(const std_msgs::msg::Float32::SharedPtr msg)
     {
         auto dt = (rclcpp::Clock().now() - last_run_front_right_).seconds();
-        velocity_state_.at(1) = msg->data;
+        velocity_state_.at(1) = (-1) * msg->data;
         position_state_.at(1) += velocity_state_.at(1) * dt;
         last_run_front_right_ = rclcpp::Clock().now();
     }
@@ -261,7 +261,7 @@ namespace jolie_firmware
     void JolieBaseInterface::from_base_callback_back_left(const std_msgs::msg::Float32::SharedPtr msg)
     {
         auto dt = (rclcpp::Clock().now() - last_run_back_left_).seconds();
-        velocity_state_.at(2) = msg->data;
+        velocity_state_.at(2) = (-1) * msg->data;
         position_state_.at(2) += velocity_state_.at(2) * dt;
         last_run_back_left_ = rclcpp::Clock().now();
     }
@@ -269,7 +269,7 @@ namespace jolie_firmware
     void JolieBaseInterface::from_base_callback_back_right(const std_msgs::msg::Float32::SharedPtr msg)
     {
         auto dt = (rclcpp::Clock().now() - last_run_back_right_).seconds();
-        velocity_state_.at(3) = msg->data;
+        velocity_state_.at(3) = (-1) * msg->data;
         position_state_.at(3) += velocity_state_.at(3) * dt;
         last_run_back_right_ = rclcpp::Clock().now();
     }
