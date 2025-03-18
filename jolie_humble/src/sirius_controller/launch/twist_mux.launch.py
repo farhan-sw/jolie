@@ -15,7 +15,14 @@ def generate_launch_description():
         remappings=[('/cmd_vel_out', '/twist_mux/cmd_vel')],
     )
     
+    twist_converter = Node(
+        package='jolie_utility',
+        executable='twist_converter_node',
+        name='twist_converter',
+    )
+    
     return LaunchDescription([
         twist_mux,
+        twist_converter,
     ])
     
