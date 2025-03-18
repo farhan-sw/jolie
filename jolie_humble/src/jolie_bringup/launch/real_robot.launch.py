@@ -33,9 +33,18 @@ def generate_launch_description():
             "twist_mux.launch.py"
         )
     )
+    
+    lidar = IncludeLaunchDescription(
+        launch_description_source=os.path.join(
+            get_package_share_directory("jolie_firmware"), 
+            "launch", 
+            "lidarC1.launch.py"
+        )
+    )
         
     return LaunchDescription([
         hardware_interface,
         controller,
-        twist_mux
+        twist_mux,
+        lidar
     ])
