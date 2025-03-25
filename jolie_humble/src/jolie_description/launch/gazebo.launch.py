@@ -66,33 +66,16 @@ def generate_launch_description():
         ]
     )
     
-    # Ubah mapping topik laser agar sesuai dengan namespace Ignition Gazebo
     gz_ros2_bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
         arguments=[
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-            "/model/jolie/laser/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"
+            "/laser/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"
         ],
         output='screen'
     )
-    
-    # lidar_bridge = Node(
-    #     package='ros_gz_bridge',
-    #     executable='parameter_bridge',
-    #     name='lidar_bridge',
-    #     output='screen',
-    #     parameters=[{
-    #         'use_sim_time': True
-    #     }],
-    #     arguments=[
-    #         ['/link/rplidar_link/sensor/rplidar/scan' +
-    #          '@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan']
-    #     ],
-    #     remappings=[
-    #         (['/link/rplidar_link/sensor/rplidar/scan'],
-    #          'scan')
-    #     ])
+
     
     return LaunchDescription([
         model_arg,
