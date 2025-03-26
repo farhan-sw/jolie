@@ -1,4 +1,5 @@
 import os
+from os import pathsep
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 
@@ -7,20 +8,41 @@ from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.parameter_descriptions import ParameterValue
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 
 def generate_launch_description():
-    ros_distro = os.environ['ROS_DISTRO']
-    # Jika ROS Humble, kita asumsikan menggunakan Ignition Gazebo.
-    is_ignition = 'True' if ros_distro == 'humble' else 'False'
     
-    nebula_description_path = Path(get_package_share_directory('jolie_description'))
+    jolie_description = get_package_share_directory('jolie_description')
     
     model_arg = DeclareLaunchArgument(
         name="model",
-        default_value=os.path.join(get_package_share_directory('jolie_description'), 'urdf', 'nebula_4wd.urdf.xacro'),
+        default_value=os.path.join(jolie_description, 'urdf', 'nebula_4wd.urdf.xacro'),
         description="Path to the robot model file",
     )
+    
+    world_name_arg = DeclareLaunchArgument(
+        name='world_name',
+        default_value='empty',
+        description='Name of the Gazebo world to load'
+    )
+    
+    world_path = PathJoinSubstitution([
+        jolie_description,  
+        "worlds",
+        PythonExpression(expression=["'", LaunchConfiguration('world_name'), "'", " + '.world'"])
+    ])
+    
+    model_path = str(Path(jolie_description).parent.resolve())
+    model_path += pathsep + os.path.join(jolie_description, "models")
+    
+    gazebo_resource_path = SetEnvironmentVariable(
+        'GZ_SIM_RESOURCE_PATH', model_path
+    )
+    
+    
+    ros_distro = os.environ['ROS_DISTRO']
+    is_ignition = 'True' if ros_distro == 'humble' else 'False'
+
     
     robot_description = ParameterValue(Command([
         'xacro ',
@@ -38,19 +60,14 @@ def generate_launch_description():
         parameters=[{'robot_description': robot_description}]
     )
     
-    gazebo_resource_path = SetEnvironmentVariable(
-        name='GAZEBO_SIM_RESOURCE_PATH',
-        value=[
-            str(Path(nebula_description_path).parent.resolve()),
-        ]
-    )
     
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
             get_package_share_directory('ros_gz_sim'), 'launch'), '/gz_sim.launch.py']),
-        launch_arguments=[
-            ("gz_args", [" -v 4", " -r", " empty.sdf"])
-        ]
+        launch_arguments={
+                "gz_args": PythonExpression(["'", world_path, " -v 4 -r'"]),
+        }.items()
+        
     )
     
     gz_spawn_entity = Node(
@@ -79,6 +96,7 @@ def generate_launch_description():
     
     return LaunchDescription([
         model_arg,
+        world_name_arg,
         robot_state_publisher,
         gazebo_resource_path,
         gazebo,
