@@ -48,6 +48,22 @@
         <child link="chassis_link"></child>
     </joint>
 
+    <link name="base_footprint">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.01"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+    </link>
+
+    <joint name="base_footprint_to_base_link" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="base_footprint"/>
+        <child link="base_link"/>
+    </joint>
+
     <link name="chassis_link">
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"></origin>

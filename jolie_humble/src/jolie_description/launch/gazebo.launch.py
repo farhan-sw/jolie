@@ -11,7 +11,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 
 def generate_launch_description():
-    
     jolie_description = get_package_share_directory('jolie_description')
     
     model_arg = DeclareLaunchArgument(
@@ -33,16 +32,15 @@ def generate_launch_description():
     ])
     
     model_path = str(Path(jolie_description).parent.resolve())
-    model_path += pathsep + os.path.join(jolie_description, "models")
+    model_path += pathsep + os.path.join(jolie_description, 'models')
     
     gazebo_resource_path = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH', model_path
     )
     
-    
     ros_distro = os.environ['ROS_DISTRO']
     is_ignition = 'True' if ros_distro == 'humble' else 'False'
-
+    
     
     robot_description = ParameterValue(Command([
         'xacro ',
@@ -59,7 +57,6 @@ def generate_launch_description():
         output='screen',
         parameters=[{'robot_description': robot_description}]
     )
-    
     
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
