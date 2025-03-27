@@ -13,3 +13,7 @@ twist_mux:
         topic   : /twist_mux/cmd_vel_joy
         timeout : 0.5
         priority: 100
+      common:
+        topic   : /cmd_vel
+        timeout : 0.5
+        priority: 1

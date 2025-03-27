@@ -4,7 +4,7 @@ amcl:
     global_frame_id: "map"
     odom_frame_id: "odom"
 
-    scan_topic: "laser/scan"
+    scan_topic: "/scan"
     tf_broadcast: true
     transform_tolerance: 1.0
     save_pose_rate: 0.5
@@ -21,6 +21,7 @@ amcl:
     alpha2: 0.2
     alpha3: 0.2
     alpha4: 0.2
+    alpha5: 0.2
 
     laser_model_type: "likelihood_field"
     beam_skip_distance: 0.5
