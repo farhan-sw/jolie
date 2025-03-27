@@ -4,7 +4,7 @@ amcl:
     global_frame_id: "map"
     odom_frame_id: "odom"
 
-    scan_topic: "scan"
+    scan_topic: "laser/scan"
     tf_broadcast: true
     transform_tolerance: 1.0
     save_pose_rate: 0.5

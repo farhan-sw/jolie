@@ -22,7 +22,7 @@
 
     <!-- parameters for wheel -->
     <xacro:property name="PI" value="3.1415926535897931"/>
-    <xacro:property name="wheel_mass" value="0.105" />
+    <xacro:property name="wheel_mass" value="0.0105" />
     <xacro:property name="wheel_radius" value="0.028" />
     <xacro:property name="wheel_thickness" value="0.01905" />
     <xacro:property name="motor_shaft_radius" value="0.002" />
