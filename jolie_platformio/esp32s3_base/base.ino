@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <FreeRTOS.h>
 #include <task.h>
@@ -8,6 +9,7 @@
 #include <OmniBase.h>
 #include <FIR.h>
 #include <stdio.h>
+#include <string.h>
 
 
 // ==========================================
@@ -221,24 +223,7 @@ void target_subscription_callback_br(const void * msgin) {
   }
 }
 
-void tuning_subscription_callback(const void * msgin) {
-  const std_msgs__msg__String* msg = (const std_msgs__msg__String*) msgin;
-  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
-    #ifdef MicroROS_DEBUG_TUNING
-      // Convert the received string message to a floating-point number
-      float parsed_value = atof(msg->data.data);
-      target_br = parsed_value;
-      #ifdef DEBUG_WITH_LED
-        if(strcmp(msg->data.data, "LED_ON") == 0) {
-          digitalWrite(DEBUG_LED_PIN, HIGH);
-        } else if(strcmp(msg->data.data, "LED_OFF") == 0) {
-          digitalWrite(DEBUG_LED_PIN, LOW);
-        }
-      #endif
-    #endif
-    xSemaphoreGive(targetMutex);
-  }
-}
+
 #endif
 
 //=========================================
@@ -288,6 +273,73 @@ ADRC adrc_fr;
 ADRC adrc_bl;
 ADRC adrc_br;
 #endif
+
+void tuning_subscription_callback(const void * msgin) {
+  const std_msgs__msg__String* msg = (const std_msgs__msg__String*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY) == pdTRUE){
+    #ifdef MicroROS_DEBUG_TUNING
+      char buffer[64];
+      char cmd[32] = {0};
+      float value = 0.0f;
+      
+      // 1. Copy data dengan proteksi buffer overflow
+      strncpy(buffer, msg->data.data, sizeof(buffer)-1);
+      buffer[sizeof(buffer)-1] = '\0'; // Pastikan null-terminated
+      
+      // 2. Parsing menggunakan sscanf dengan format yang aman
+      int parsed = sscanf(buffer, "%31s %f", cmd, &value);
+      
+      // 3. Validasi hasil parsing
+      if(parsed == 2) { // Jika berhasil parse command + value
+        // 4. Set target motor berdasarkan command
+        if(strcmp(cmd, "SET_TARGET_FL") == 0) {
+          target_fl = value;
+        } else if(strcmp(cmd, "SET_TARGET_FR") == 0) {
+          target_fr = value;
+        } else if(strcmp(cmd, "SET_TARGET_BL") == 0) {
+          target_bl = value;
+        } else if(strcmp(cmd, "SET_TARGET_BR") == 0) {
+          target_br = value;
+        }
+        // 5. Tuning parameter PID
+        else if(strcmp(cmd, "SET_KP") == 0) {
+          pidFL.setP(value);
+          pidFR.setP(value);
+          pidBL.setP(value);
+          pidBR.setP(value);
+        } else if(strcmp(cmd, "SET_KI") == 0) {
+          pidFL.setI(value);
+          pidFR.setI(value);
+          pidBL.setI(value);
+          pidBR.setI(value);
+        } else if(strcmp(cmd, "SET_KD") == 0) {
+          pidFL.setD(value);
+          pidFR.setD(value);
+          pidBL.setD(value);
+          pidBR.setD(value);
+        }
+        // [Tambahkan command baru di sini]
+      }
+      // 6. Handle command khusus tanpa parameter
+      else if(parsed == 1) {
+        #ifdef DEBUG_WITH_LED
+          if(strcmp(cmd, "LED_ON") == 0) {
+            digitalWrite(DEBUG_LED_PIN, HIGH);
+          } else if(strcmp(cmd, "LED_OFF") == 0) {
+            digitalWrite(DEBUG_LED_PIN, LOW);
+          }
+        #endif
+        
+        // Contoh command emergency stop
+        if(strcmp(cmd, "EMERGENCY_STOP") == 0) {
+          target_fl = target_fr = target_bl = target_br = 0.0f;
+          omniBase.setMotorSpeeds(0, 0, 0, 0);
+        }
+      }
+    #endif
+    xSemaphoreGive(targetMutex);
+  }
+}
 
 // Interval update motor: 10 ms
 const int updateMotorVelocityInterval = 10;
@@ -450,6 +502,14 @@ void setup() {
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), TUNING_TOPIC));
     
     target_msg_fl.data = target_msg_fr.data = target_msg_bl.data = target_msg_br.data = 0.0f;
+
+    // Initialize the string message data with appropriate capacity
+    tuning_msg.data.capacity = 100; // Allocate space for 100 characters
+    tuning_msg.data.size = 0;       // Initially empty string
+    tuning_msg.data.data = (char*) malloc(tuning_msg.data.capacity * sizeof(char));
+    if (tuning_msg.data.data == NULL) {
+      error_loop();
+    }
     
     const unsigned int timer_timeout_ms = 20;
     RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(timer_timeout_ms), timer_callback));
@@ -503,3 +563,43 @@ void setup() {
 void loop() {
   delay(10);
 }
+
+// #include <Arduino.h>
+// #include <Adafruit_NeoPixel.h>
+
+// // Uncomment the line that matches your board version
+// // #define BOARD_V1  // If your LED is on pin 48
+// #define BOARD_LATEST // If your LED is on pin 38
+
+// #ifdef BOARD_V1
+// const int RGB_PIN = 48;
+// #else
+// const int RGB_PIN = 38;
+// #endif
+
+// Adafruit_NeoPixel pixel(1, RGB_PIN, NEO_GRB + NEO_KHZ800);
+
+// void setup() {
+//   pixel.begin();
+//   pixel.setBrightness(30); // Start at 30% brightness
+// }
+
+// void loop() {
+//   // Cycle through colors
+//   pixel.setPixelColor(0, 255, 0, 0); // Red
+//   pixel.show();
+//   delay(1000);
+
+//   pixel.setPixelColor(0, 0, 255, 0); // Green
+//   pixel.show();
+//   delay(1000);
+
+//   pixel.setPixelColor(0, 0, 0, 255); // Blue
+//   pixel.show();
+//   delay(1000);
+
+//   // Custom color (white)
+//   pixel.setPixelColor(0, 255, 255, 255);
+//   pixel.show();
+//   delay(1000);
+// }
