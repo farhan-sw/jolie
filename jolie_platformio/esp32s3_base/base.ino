@@ -14,8 +14,7 @@
 
 // ==========================================
 // ==========================================
-// ============== DEFINISI ==================
-
+// ============== DEFINISI ===================
 // ****** TO CHOOSE MODE *******
 bool isDebug = false; // false: Mode ROS (tanpa Serial.print), true: Mode Debug (dengan Serial.print)
 bool sendInRad = true; // true: kirim nilai omega (rad/s), false: kirim kecepatan linear (m/s)
@@ -34,11 +33,58 @@ bool sendInRad = true; // true: kirim nilai omega (rad/s), false: kirim kecepata
 // ==========================================
 // ==========================================
 
-
 //=========================================
 // Konfigurasi Global & Mode Debug
 //=========================================
 const float wheelRadius = 0.05; // Faktor konversi, misalnya 5 cm
+
+//=========================================
+// Setup OmniBase, PID, dan FIR Filter
+//=========================================
+ESP32Encoder enc_FL;
+ESP32Encoder enc_FR;
+ESP32Encoder enc_BL;
+ESP32Encoder enc_BR;
+
+Motor motorFR(MTR1_EN, MTR1_LPWM, MTR1_RPWM);
+Motor motorFL(MTR2_EN, MTR2_LPWM, MTR2_RPWM);
+Motor motorBR(MTR3_EN, MTR3_LPWM, MTR3_RPWM);
+Motor motorBL(MTR4_EN, MTR4_LPWM, MTR4_RPWM);
+
+CalculateEncoder calc_FL(0.056, 213);
+CalculateEncoder calc_FR(0.056, 213);
+CalculateEncoder calc_BL(0.056, 213);
+CalculateEncoder calc_BR(0.056, 213);
+
+OmniBase omniBase(enc_FL, enc_FR, enc_BL, enc_BR,
+                  calc_FL, calc_FR, calc_BL, calc_BR,
+                  motorFL, motorFR, motorBL, motorBR);
+
+// Koefisien FIR (hasil desain MATLAB)
+float firCoefficients[] = {0.0082, 0.0410, 0.1196, 0.2107, 0.2605, 0.2107, 0.1196, 0.0410, 0.0082};
+int firOrder = 8;
+FIR firFL(firOrder, firCoefficients);
+FIR firFR(firOrder, firCoefficients);
+FIR firBL(firOrder, firCoefficients);
+FIR firBR(firOrder, firCoefficients);
+
+#ifdef UsePID
+#include <MiniPID.h>
+// Konstanta PID (tuning lebih lanjut diperlukan)
+float kp = 0.005, ki = 0.001, kd = 0.0;
+MiniPID pidFL(kp, ki, kd);
+MiniPID pidFR(kp, ki, kd);
+MiniPID pidBL(kp, ki, kd);
+MiniPID pidBR(kp, ki, kd);
+#endif
+
+#ifdef UseADRC
+#include <ADRC.h>
+ADRC adrc_fl;
+ADRC adrc_fr;
+ADRC adrc_bl;
+ADRC adrc_br;
+#endif
 
 // Gunakan LED hanya pada mode debug (untuk menghindari konflik di ROS mode)
 #ifdef DEBUG_WITH_LED
@@ -65,8 +111,6 @@ const float wheelRadius = 0.05; // Faktor konversi, misalnya 5 cm
 #define BASE_SUB_BACK_RIGHT_TOPIC "target_velocity_br"
 
 #define TUNING_TOPIC "tuning_topic"
-
-
 
 //=========================================
 // Variabel Global untuk Komunikasi ROS
@@ -223,57 +267,6 @@ void target_subscription_callback_br(const void * msgin) {
   }
 }
 
-
-#endif
-
-//=========================================
-// Setup OmniBase, PID, dan FIR Filter
-//=========================================
-ESP32Encoder enc_FL;
-ESP32Encoder enc_FR;
-ESP32Encoder enc_BL;
-ESP32Encoder enc_BR;
-
-Motor motorFR(MTR1_EN, MTR1_LPWM, MTR1_RPWM);
-Motor motorFL(MTR2_EN, MTR2_LPWM, MTR2_RPWM);
-Motor motorBR(MTR3_EN, MTR3_LPWM, MTR3_RPWM);
-Motor motorBL(MTR4_EN, MTR4_LPWM, MTR4_RPWM);
-
-CalculateEncoder calc_FL(0.056, 213);
-CalculateEncoder calc_FR(0.056, 213);
-CalculateEncoder calc_BL(0.056, 213);
-CalculateEncoder calc_BR(0.056, 213);
-
-OmniBase omniBase(enc_FL, enc_FR, enc_BL, enc_BR,
-                  calc_FL, calc_FR, calc_BL, calc_BR,
-                  motorFL, motorFR, motorBL, motorBR);
-
-// Koefisien FIR (hasil desain MATLAB)
-float firCoefficients[] = {0.0082, 0.0410, 0.1196, 0.2107, 0.2605, 0.2107, 0.1196, 0.0410, 0.0082};
-int firOrder = 8;
-FIR firFL(firOrder, firCoefficients);
-FIR firFR(firOrder, firCoefficients);
-FIR firBL(firOrder, firCoefficients);
-FIR firBR(firOrder, firCoefficients);
-
-#ifdef UsePID
-#include <MiniPID.h>
-// Konstanta PID (tuning lebih lanjut diperlukan)
-float kp = 0.005, ki = 0.001, kd = 0.0;
-MiniPID pidFL(kp, ki, kd);
-MiniPID pidFR(kp, ki, kd);
-MiniPID pidBL(kp, ki, kd);
-MiniPID pidBR(kp, ki, kd);
-#endif
-
-#ifdef UseADRC
-#include <ADRC.h>
-ADRC adrc_fl;
-ADRC adrc_fr;
-ADRC adrc_bl;
-ADRC adrc_br;
-#endif
-
 void tuning_subscription_callback(const void * msgin) {
   const std_msgs__msg__String* msg = (const std_msgs__msg__String*) msgin;
   if(xSemaphoreTake(targetMutex, portMAX_DELAY) == pdTRUE){
@@ -282,16 +275,16 @@ void tuning_subscription_callback(const void * msgin) {
       char cmd[32] = {0};
       float value = 0.0f;
       
-      // 1. Copy data dengan proteksi buffer overflow
+      // 1. Copy data dengan proteksi buffer
       strncpy(buffer, msg->data.data, sizeof(buffer)-1);
-      buffer[sizeof(buffer)-1] = '\0'; // Pastikan null-terminated
+      buffer[sizeof(buffer)-1] = '\0';
       
-      // 2. Parsing menggunakan sscanf dengan format yang aman
+      // 2. Parsing command
       int parsed = sscanf(buffer, "%31s %f", cmd, &value);
       
-      // 3. Validasi hasil parsing
-      if(parsed == 2) { // Jika berhasil parse command + value
-        // 4. Set target motor berdasarkan command
+      // 3. Proses command
+      if(parsed == 2) {
+        // Command SET_TARGET
         if(strcmp(cmd, "SET_TARGET_FL") == 0) {
           target_fl = value;
         } else if(strcmp(cmd, "SET_TARGET_FR") == 0) {
@@ -301,36 +294,59 @@ void tuning_subscription_callback(const void * msgin) {
         } else if(strcmp(cmd, "SET_TARGET_BR") == 0) {
           target_br = value;
         }
-        // 5. Tuning parameter PID
-        else if(strcmp(cmd, "SET_KP") == 0) {
+        // Command SET_KP untuk motor spesifik
+        else if(strncmp(cmd, "SET_KP_", 7) == 0) {
+          const char* motor = cmd + 7;
+          if(strcmp(motor, "FL") == 0) pidFL.setP(value);
+          else if(strcmp(motor, "FR") == 0) pidFR.setP(value);
+          else if(strcmp(motor, "BL") == 0) pidBL.setP(value);
+          else if(strcmp(motor, "BR") == 0) pidBR.setP(value);
+        }
+        // Command SET_KI untuk motor spesifik
+        else if(strncmp(cmd, "SET_KI_", 7) == 0) {
+          const char* motor = cmd + 7;
+          if(strcmp(motor, "FL") == 0) pidFL.setI(value);
+          else if(strcmp(motor, "FR") == 0) pidFR.setI(value);
+          else if(strcmp(motor, "BL") == 0) pidBL.setI(value);
+          else if(strcmp(motor, "BR") == 0) pidBR.setI(value);
+        }
+        // Command SET_KD untuk motor spesifik
+        else if(strncmp(cmd, "SET_KD_", 7) == 0) {
+          const char* motor = cmd + 7;
+          if(strcmp(motor, "FL") == 0) pidFL.setD(value);
+          else if(strcmp(motor, "FR") == 0) pidFR.setD(value);
+          else if(strcmp(motor, "BL") == 0) pidBL.setD(value);
+          else if(strcmp(motor, "BR") == 0) pidBR.setD(value);
+        }
+        // Command SET_KP_ALL untuk semua motor
+        else if(strcmp(cmd, "SET_KP_ALL") == 0) {
           pidFL.setP(value);
           pidFR.setP(value);
           pidBL.setP(value);
           pidBR.setP(value);
-        } else if(strcmp(cmd, "SET_KI") == 0) {
+        }
+        // Command SET_KI_ALL untuk semua motor
+        else if(strcmp(cmd, "SET_KI_ALL") == 0) {
           pidFL.setI(value);
           pidFR.setI(value);
           pidBL.setI(value);
           pidBR.setI(value);
-        } else if(strcmp(cmd, "SET_KD") == 0) {
+        }
+        // Command SET_KD_ALL untuk semua motor
+        else if(strcmp(cmd, "SET_KD_ALL") == 0) {
           pidFL.setD(value);
           pidFR.setD(value);
           pidBL.setD(value);
           pidBR.setD(value);
         }
-        // [Tambahkan command baru di sini]
       }
-      // 6. Handle command khusus tanpa parameter
+      // Command tanpa parameter
       else if(parsed == 1) {
         #ifdef DEBUG_WITH_LED
-          if(strcmp(cmd, "LED_ON") == 0) {
-            digitalWrite(DEBUG_LED_PIN, HIGH);
-          } else if(strcmp(cmd, "LED_OFF") == 0) {
-            digitalWrite(DEBUG_LED_PIN, LOW);
-          }
+          if(strcmp(cmd, "LED_ON") == 0) digitalWrite(DEBUG_LED_PIN, HIGH);
+          else if(strcmp(cmd, "LED_OFF") == 0) digitalWrite(DEBUG_LED_PIN, LOW);
         #endif
         
-        // Contoh command emergency stop
         if(strcmp(cmd, "EMERGENCY_STOP") == 0) {
           target_fl = target_fr = target_bl = target_br = 0.0f;
           omniBase.setMotorSpeeds(0, 0, 0, 0);
@@ -340,6 +356,8 @@ void tuning_subscription_callback(const void * msgin) {
     xSemaphoreGive(targetMutex);
   }
 }
+
+#endif
 
 // Interval update motor: 10 ms
 const int updateMotorVelocityInterval = 10;
