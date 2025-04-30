@@ -1,35 +1,51 @@
 #include <Arduino.h>
 #include <FreeRTOS.h>
 #include <task.h>
-#include <semphr.h>         // Untuk mutex
+#include <semphr.h>
 #include <ESP32Encoder.h>
 #include <Motor.h>
 #include <ConfigPin.h>
 #include <OmniBase.h>
 #include <FIR.h>
-#include <MiniPID.h>
 #include <stdio.h>
 
-// micro-ROS header (hanya digunakan jika isDebug == false)
-#include <rcl/rcl.h>
-#include <rcl/error_handling.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <std_msgs/msg/float32.h>
+
+// ==========================================
+// ==========================================
+// ============== DEFINISI ==================
+
+// ****** TO CHOOSE MODE *******
+bool isDebug = false; // false: Mode ROS (tanpa Serial.print), true: Mode Debug (dengan Serial.print)
+bool sendInRad = true; // true: kirim nilai omega (rad/s), false: kirim kecepatan linear (m/s)
+
+// ****** TO DEBUG MODE *******
+// #define DEBUG_WITH_LED
+// #define DEBUG_ERROR
+#define MicroROS
+// #define MicroROS_DEBUG
+#define MicroROS_DEBUG_TUNING
+// #define RTOS_DEBUG_RESOURCES
+
+// ****** TO CHOOSE CONTROL ALGORITHM *******
+#define UsePID
+// #define UseADRC
+// ==========================================
+// ==========================================
+
 
 //=========================================
 // Konfigurasi Global & Mode Debug
 //=========================================
-bool isDebug = false; // false: Mode ROS (tanpa Serial.print), true: Mode Debug (dengan Serial.print)
-bool sendInRad = true; // true: kirim nilai omega (rad/s), false: kirim kecepatan linear (m/s)
 const float wheelRadius = 0.05; // Faktor konversi, misalnya 5 cm
 
 // Gunakan LED hanya pada mode debug (untuk menghindari konflik di ROS mode)
-#ifndef DEBUG_LED_PIN
-  #ifdef LED_BUILTIN
-    #define DEBUG_LED_PIN LED_BUILTIN
-  #else
-    #define DEBUG_LED_PIN 13
+#ifdef DEBUG_WITH_LED
+  #ifndef DEBUG_LED_PIN
+    #ifdef LED_BUILTIN
+      #define DEBUG_LED_PIN LED_BUILTIN
+    #else
+      #define DEBUG_LED_PIN 13
+    #endif
   #endif
 #endif
 
@@ -46,6 +62,37 @@ const float wheelRadius = 0.05; // Faktor konversi, misalnya 5 cm
 #define BASE_SUB_BACK_LEFT_TOPIC "target_velocity_bl"
 #define BASE_SUB_BACK_RIGHT_TOPIC "target_velocity_br"
 
+#define TUNING_TOPIC "tuning_topic"
+
+
+
+//=========================================
+// Variabel Global untuk Komunikasi ROS
+//=========================================
+#ifdef MicroROS
+#include <rcl/rcl.h>
+#include <rcl/error_handling.h>
+#include <rclc/rclc.h>
+#include <rclc/executor.h>
+#include <std_msgs/msg/float32.h>
+#include <std_msgs/msg/string.h>
+
+rcl_publisher_t publisher_fl, publisher_fr, publisher_bl, publisher_br;
+std_msgs__msg__Float32 msg_fl, msg_fr, msg_bl, msg_br;
+rcl_subscription_t subscriber_fl, subscriber_fr, subscriber_bl, subscriber_br;
+std_msgs__msg__Float32 target_msg_fl, target_msg_fr, target_msg_bl, target_msg_br;
+
+rcl_subscription_t tuning_subscriber;
+std_msgs__msg__String tuning_msg;
+
+
+rclc_executor_t executor;
+rclc_support_t support;
+rcl_allocator_t allocator;
+rcl_node_t node;
+rcl_timer_t timer;
+#endif
+
 //=========================================
 // Variabel untuk Feedback dan Pengolahan
 //=========================================
@@ -56,32 +103,15 @@ float omegaFL, omegaFR, omegaBL, omegaBR;
 float FirVelFL, FirVelFR, FirVelBL, FirVelBR;
 float FirOmegaFL, FirOmegaFR, FirOmegaBL, FirOmegaBR;
 
-//=========================================
-// Variabel Global untuk Komunikasi ROS
-//=========================================
-#if !isDebug
-rcl_publisher_t publisher_fl, publisher_fr, publisher_bl, publisher_br;
-std_msgs__msg__Float32 msg_fl, msg_fr, msg_bl, msg_br;
-rcl_subscription_t subscriber_fl, subscriber_fr, subscriber_bl, subscriber_br;
-std_msgs__msg__Float32 target_msg_fl, target_msg_fr, target_msg_bl, target_msg_br;
-#endif
-
 // Global target kecepatan dengan proteksi mutex
 float target_fl = 0.0f, target_fr = 0.0f, target_bl = 0.0f, target_br = 0.0f;
 SemaphoreHandle_t targetMutex = NULL;
 
-#if !isDebug
-rclc_executor_t executor;
-rclc_support_t support;
-rcl_allocator_t allocator;
-rcl_node_t node;
-rcl_timer_t timer;
-#endif
 
 //=========================================
 // Helper Macro untuk Error Checking (ROS mode tanpa Serial Print)
 //=========================================
-#if !isDebug
+#ifdef MicroROS
 uint32_t rclPublishErrorCount = 0;
 #define RCCHECK(fn) { \
   rcl_ret_t temp_rc = fn; \
@@ -98,27 +128,14 @@ uint32_t rclPublishErrorCount = 0;
     } \
   } \
 }
-#else
-#define RCCHECK(fn) { \
-  rcl_ret_t temp_rc = fn; \
-  if(temp_rc != RCL_RET_OK){ \
-    Serial.print("Error at "); Serial.println(#fn); \
-    error_loop(); \
-  } \
-}
-#define RCSOFTCHECK(fn) { \
-  rcl_ret_t temp_rc = fn; \
-  if(temp_rc != RCL_RET_OK){ \
-    Serial.print("Soft Error at "); Serial.println(#fn); \
-  } \
-}
 #endif
 
+
 //=========================================
-// Error Handler (tanpa Serial Print pada ROS mode)
+// Error Handler
 //=========================================
 void error_loop(){
-  #if !isDebug
+  #ifndef DEBUG_ERROR
     while(1){
       delay(100);
     }
@@ -132,12 +149,12 @@ void error_loop(){
 }
 
 //=========================================
-// Timer Callback untuk Publikasi (20ms)
+// Timer Callback untuk Publikasi
 //=========================================
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 {
   (void) last_call_time;
-  #if !isDebug
+  #ifdef MicroROS
     if(timer != NULL){
       if(sendInRad){
         msg_fl.data = FirOmegaFL;
@@ -158,12 +175,12 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
   #else
     Serial.print("Feedback: ");
     if(sendInRad){
-      Serial.print("Omega FL: "); Serial.print(FirOmegaFL, 3);
+      Serial.print(" Omega FL: "); Serial.print(FirOmegaFL, 3);
       Serial.print(" Omega FR: "); Serial.print(FirOmegaFR, 3);
       Serial.print(" Omega BL: "); Serial.print(FirOmegaBL, 3);
       Serial.print(" Omega BR: "); Serial.println(FirOmegaBR, 3);
     } else {
-      Serial.print("Vel FL: "); Serial.print(FirVelFL, 3);
+      Serial.print(" Vel FL: "); Serial.print(FirVelFL, 3);
       Serial.print(" Vel FR: "); Serial.print(FirVelFR, 3);
       Serial.print(" Vel BL: "); Serial.print(FirVelBL, 3);
       Serial.print(" Vel BR: "); Serial.println(FirVelBR, 3);
@@ -174,6 +191,7 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 //=========================================
 // Subscription Callback untuk Update Target
 //=========================================
+#ifdef MicroROS
 void target_subscription_callback_fl(const void * msgin) {
   const std_msgs__msg__Float32* incoming = (const std_msgs__msg__Float32*) msgin;
   if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
@@ -202,6 +220,26 @@ void target_subscription_callback_br(const void * msgin) {
     xSemaphoreGive(targetMutex);
   }
 }
+
+void tuning_subscription_callback(const void * msgin) {
+  const std_msgs__msg__String* msg = (const std_msgs__msg__String*) msgin;
+  if(xSemaphoreTake(targetMutex, portMAX_DELAY)==pdTRUE){
+    #ifdef MicroROS_DEBUG_TUNING
+      // Convert the received string message to a floating-point number
+      float parsed_value = atof(msg->data.data);
+      target_br = parsed_value;
+      #ifdef DEBUG_WITH_LED
+        if(strcmp(msg->data.data, "LED_ON") == 0) {
+          digitalWrite(DEBUG_LED_PIN, HIGH);
+        } else if(strcmp(msg->data.data, "LED_OFF") == 0) {
+          digitalWrite(DEBUG_LED_PIN, LOW);
+        }
+      #endif
+    #endif
+    xSemaphoreGive(targetMutex);
+  }
+}
+#endif
 
 //=========================================
 // Setup OmniBase, PID, dan FIR Filter
@@ -233,14 +271,25 @@ FIR firFR(firOrder, firCoefficients);
 FIR firBL(firOrder, firCoefficients);
 FIR firBR(firOrder, firCoefficients);
 
+#ifdef UsePID
+#include <MiniPID.h>
 // Konstanta PID (tuning lebih lanjut diperlukan)
 float kp = 0.005, ki = 0.001, kd = 0.0;
 MiniPID pidFL(kp, ki, kd);
 MiniPID pidFR(kp, ki, kd);
 MiniPID pidBL(kp, ki, kd);
 MiniPID pidBR(kp, ki, kd);
+#endif
 
-// Interval update motor: 10 ms (agar data selalu segar)
+#ifdef UseADRC
+#include <ADRC.h>
+ADRC adrc_fl;
+ADRC adrc_fr;
+ADRC adrc_bl;
+ADRC adrc_br;
+#endif
+
+// Interval update motor: 10 ms
 const int updateMotorVelocityInterval = 10;
 
 //=========================================
@@ -276,22 +325,42 @@ void updateMotorVelocity(void *parameter) {
       local_target_br = target_br;
       xSemaphoreGive(targetMutex);
     }
-    
-    // Hitung output PID (pastikan konsistensi satuan)
-    float out_fl, out_fr, out_bl, out_br;
-    if(sendInRad) {
-      out_fl = pidFL.getOutput(FirOmegaFL, local_target_fl);
-      out_fr = pidFR.getOutput(FirOmegaFR, local_target_fr);
-      out_bl = pidBL.getOutput(FirOmegaBL, local_target_bl);
-      out_br = pidBR.getOutput(FirOmegaBR, local_target_br);
-    } else {
-      out_fl = pidFL.getOutput(FirVelFL, local_target_fl);
-      out_fr = pidFR.getOutput(FirVelFR, local_target_fr);
-      out_bl = pidBL.getOutput(FirVelBL, local_target_bl);
-      out_br = pidBR.getOutput(FirVelBR, local_target_br);
-    }
-    
-    omniBase.setMotorSpeeds(out_fl, out_fr, out_bl, out_br);
+
+    #ifdef UsePID
+      // Hitung output PID
+      float out_fl, out_fr, out_bl, out_br;
+      if(sendInRad) {
+        out_fl = pidFL.getOutput(FirOmegaFL, local_target_fl);
+        out_fr = pidFR.getOutput(FirOmegaFR, local_target_fr);
+        out_bl = pidBL.getOutput(FirOmegaBL, local_target_bl);
+        out_br = pidBR.getOutput(FirOmegaBR, local_target_br);
+      } else {
+        out_fl = pidFL.getOutput(FirVelFL, local_target_fl);
+        out_fr = pidFR.getOutput(FirVelFR, local_target_fr);
+        out_bl = pidBL.getOutput(FirVelBL, local_target_bl);
+        out_br = pidBR.getOutput(FirVelBR, local_target_br);
+      }
+
+      omniBase.setMotorSpeeds(out_fl, out_fr, out_bl, out_br);
+    #endif
+
+    #ifdef UseADRC
+      // Hitung Output ADRC
+      float out_fl_adrc, out_fr_adrc, out_bl_adrc, out_br_adrc;
+      if(sendInRad){
+        out_fl_adrc = computeControlSignal(&adrc_fl, local_target_fl, FirOmegaFL, &out_fl_adrc);
+        out_fr_adrc = computeControlSignal(&adrc_fr, local_target_fr, FirOmegaFR, &out_fr_adrc);
+        out_bl_adrc = computeControlSignal(&adrc_bl, local_target_bl, FirOmegaBL, &out_bl_adrc);
+        out_br_adrc = computeControlSignal(&adrc_br, local_target_br, FirOmegaBR, &out_br_adrc);
+      } else {
+        out_fl_adrc = computeControlSignal(&adrc_fl, local_target_fl, FirVelFL, &out_fl_adrc);
+        out_fr_adrc = computeControlSignal(&adrc_fr, local_target_fr, FirVelFR, &out_fr_adrc);
+        out_bl_adrc = computeControlSignal(&adrc_bl, local_target_bl, FirVelBL, &out_bl_adrc);
+        out_br_adrc = computeControlSignal(&adrc_br, local_target_br, FirVelBR, &out_br_adrc);
+      } 
+
+      omniBase.setMotorSpeeds(out_fl_adrc, out_fr_adrc, out_bl_adrc, out_br_adrc);
+    #endif   
     
     vTaskDelayUntil(&lastWakeTime, updateMotorVelocityInterval / portTICK_PERIOD_MS);
   }
@@ -300,6 +369,7 @@ void updateMotorVelocity(void *parameter) {
 //=========================================
 // Task ROS Executor (Pinned ke Core 0, Stack 2048, Prioritas 3)
 //=========================================
+#ifdef MicroROS
 void rosExecutorTask(void *parameter) {
   (void) parameter;
   const TickType_t executorDelay = 5;
@@ -313,11 +383,13 @@ void rosExecutorTask(void *parameter) {
     vTaskDelay(executorDelay / portTICK_PERIOD_MS);
   }
 }
+#endif
 
-#if isDebug
+
 //=========================================
 // Task Monitoring Resource (hanya aktif pada mode debug, Pinned ke Core 0)
 //=========================================
+#ifdef RTOS_DEBUG_RESOURCES
 void monitorResourcesTask(void *parameter) {
   (void) parameter;
   while(true) {
@@ -333,19 +405,21 @@ void monitorResourcesTask(void *parameter) {
 // Setup Fungsi Utama
 //=========================================
 void setup() {
-  if(isDebug) {
+  #ifdef DEBUG_WITH_LED
     Serial.begin(115200);
     pinMode(DEBUG_LED_PIN, OUTPUT);
     digitalWrite(DEBUG_LED_PIN, LOW);
-  }
+  #endif
   
   targetMutex = xSemaphoreCreateMutex();
   if(targetMutex == NULL){
-    if(isDebug) { Serial.println("Failed to create mutex!"); }
+    #ifdef DEBUG_ERROR
+      Serial.println("Failed to create mutex!");
+    #endif
     error_loop();
   }
   
-  if(!isDebug) {
+  #ifdef MicroROS
     set_microros_transports();
     delay(2000);
     
@@ -372,34 +446,56 @@ void setup() {
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_BACK_LEFT_TOPIC));
     RCCHECK(rclc_subscription_init_default(&subscriber_br, &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), BASE_SUB_BACK_RIGHT_TOPIC));
+    RCCHECK(rclc_subscription_init_default(&tuning_subscriber, &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), TUNING_TOPIC));
     
     target_msg_fl.data = target_msg_fr.data = target_msg_bl.data = target_msg_br.data = 0.0f;
     
     const unsigned int timer_timeout_ms = 20;
     RCCHECK(rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(timer_timeout_ms), timer_callback));
     
-    RCCHECK(rclc_executor_init(&executor, &support.context, 5, &allocator));
+    RCCHECK(rclc_executor_init(&executor, &support.context, 6, &allocator));
     RCCHECK(rclc_executor_add_timer(&executor, &timer));
     RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fl, &target_msg_fl, target_subscription_callback_fl, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_fr, &target_msg_fr, target_subscription_callback_fr, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_bl, &target_msg_bl, target_subscription_callback_bl, ON_NEW_DATA));
     RCCHECK(rclc_executor_add_subscription(&executor, &subscriber_br, &target_msg_br, target_subscription_callback_br, ON_NEW_DATA));
-  }
+    RCCHECK(rclc_executor_add_subscription(&executor, &tuning_subscriber, &tuning_msg, tuning_subscription_callback, ON_NEW_DATA));
+  #endif
   
   omniBase.setup(ENCA_1, ENCB_1, ENCA_2, ENCB_2, ENCA_3, ENCB_3, ENCA_4, ENCB_4);
+
+  #ifdef UsePID
   pidFL.setOutputLimits(-1, 1);
   pidFR.setOutputLimits(-1, 1);
   pidBL.setOutputLimits(-1, 1);
   pidBR.setOutputLimits(-1, 1);
+  #endif
+
+  #ifdef UseADRC
+  // Initialize ADRC
+  // initADRC(&motor.adrc, sampling_time, 45.0, 1.0, 1, -220, 220); // standar 3.0, 0.5, 3  b0 = 55.8 -- 45.0, 1.0, 1
+  initADRC(&adrc_fl, updateMotorVelocityInterval, 45.0, 1.0, 1, -1.0, 1.0); // standar 3.0, 0.5, 3  b0 = 55.8 -- 45.0, 1.0, 1
+  initADRC(&adrc_fr, updateMotorVelocityInterval, 45.0, 1.0, 1, -1.0, 1.0); // standar 3.0, 0.5, 3  b0 = 55.8 -- 45.0, 1.0, 1
+  initADRC(&adrc_bl, updateMotorVelocityInterval, 45.0, 1.0, 1, -1.0, 1.0); // standar 3.0, 0.5, 3  b0 = 55.8 -- 45.0, 1.0, 1
+  initADRC(&adrc_br, updateMotorVelocityInterval, 45.0, 1.0, 1, -1.0, 1.0); // standar 3.0, 0.5, 3  b0 = 55.8 -- 45.0, 1.0, 1
+  // Setelah inisialisasi, reset ESO
+  resetADRC(&adrc_fl);
+  resetADRC(&adrc_fr);
+  resetADRC(&adrc_bl);
+  resetADRC(&adrc_br);
+  #endif
   
   // Buat task update motor, pinned ke Core 1 dengan stack 4096 dan prioritas 1
   xTaskCreatePinnedToCore(updateMotorVelocity, "Update Motor Velocity", 4096, NULL, 1, NULL, 1);
-  // Buat task ROS executor, pinned ke Core 0 dengan stack 2048 dan prioritas 3
-  if(!isDebug) {
+
+  #ifdef MicroROS
+    // Buat task ROS executor, pinned ke Core 0 dengan stack 2048 dan prioritas 3
     xTaskCreatePinnedToCore(rosExecutorTask, "ROS Executor Task", 2048, NULL, 3, NULL, 0);
-  }
-  // Task monitoring resource hanya aktif di mode debug, pinned ke Core 0
-  #if isDebug
+  #endif
+  
+  #ifdef RTOS_DEBUG_RESOURCES
+    // Buat task monitoring resource, pinned ke Core 0 dengan stack 2048 dan prioritas 2
     xTaskCreatePinnedToCore(monitorResourcesTask, "Monitor Resources", 2048, NULL, 2, NULL, 0);
   #endif
 }
