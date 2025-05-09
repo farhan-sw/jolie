@@ -36,4 +36,8 @@ This file contains the date logs for each development progress. It contains the 
 - **References**:
     - https://github.com/hippo5329/micro_ros_arduino_examples_platformio
     - https://github.com/hippo5329/micro_ros_arduino_examples_platformio/wiki
+
+### [2025-05-20]
+- **Progress**: 
+    - sudo apt-get install ros-humble-imu-tools
     

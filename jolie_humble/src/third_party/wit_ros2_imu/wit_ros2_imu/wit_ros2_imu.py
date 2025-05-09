@@ -6,254 +6,213 @@ import numpy as np
 import threading
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, MagneticField
+from rclpy.qos import QoSProfile
 
-key = 0
-flag = 0
-buff = {}
-angularVelocity = [0, 0, 0]
-acceleration = [0, 0, 0]
-magnetometer = [0, 0, 0]
-angle_degree = [0, 0, 0]
-
-
-# 定义IMU驱动节点类
 def hex_to_short(raw_data):
     return list(struct.unpack("hhhh", bytearray(raw_data)))
-
 
 def check_sum(list_data, check_data):
     return sum(list_data) & 0xff == check_data
 
-
-def handle_serial_data(raw_data):
-    global buff, key, angle_degree, magnetometer, acceleration, angularVelocity, pub_flag
-    angle_flag = False
-    buff[key] = raw_data
-
-    key += 1
-    if buff[0] != 0x55:
-        key = 0
-        return
-    # According to the judgment of the data length bit, the corresponding length data can be obtained
-    if key < 11:
-        return
-    else:
-        data_buff = list(buff.values())  # Get dictionary ownership value
-        if buff[1] == 0x51:
-            if check_sum(data_buff[0:10], data_buff[10]):
-                acceleration = [hex_to_short(data_buff[2:10])[i] / 32768.0 * 16 * 9.8 for i in range(0, 3)]
-            else:
-                print('0x51 Check failure')
-
-        elif buff[1] == 0x52:
-            if check_sum(data_buff[0:10], data_buff[10]):
-                angularVelocity = [hex_to_short(data_buff[2:10])[i] / 32768.0 * 2000 * math.pi / 180 for i in
-                                   range(0, 3)]
-
-            else:
-                print('0x52 Check failure')
-
-        elif buff[1] == 0x53:
-            if check_sum(data_buff[0:10], data_buff[10]):
-                angle_degree = [hex_to_short(data_buff[2:10])[i] / 32768.0 * 180 for i in range(0, 3)]
-                angle_flag = True
-            else:
-                print('0x53 Check failure')
-        elif buff[1] == 0x54:
-            if check_sum(data_buff[0:10], data_buff[10]):
-                magnetometer = hex_to_short(data_buff[2:10])
-            else:
-                print('0x54 Check failure')
-        else:
-            buff = {}
-            key = 0
-
-        buff = {}
-        key = 0
-        return angle_flag
-        # if angle_flag:
-        #     stamp = rospy.get_rostime()
-        #
-        #     imu_msg.header.stamp = stamp
-        #     imu_msg.header.frame_id = "base_link"
-        #
-        #     mag_msg.header.stamp = stamp
-        #     mag_msg.header.frame_id = "base_link"
-        #
-        #     angle_radian = [angle_degree[i] * math.pi / 180 for i in range(3)]
-        #     qua = quaternion_from_euler(angle_radian[0], angle_radian[1], angle_radian[2])
-        #
-        #     imu_msg.orientation.x = qua[0]
-        #     imu_msg.orientation.y = qua[1]
-        #     imu_msg.orientation.z = qua[2]
-        #     imu_msg.orientation.w = qua[3]
-        #
-        #     imu_msg.angular_velocity.x = angularVelocity[0]
-        #     imu_msg.angular_velocity.y = angularVelocity[1]
-        #     imu_msg.angular_velocity.z = angularVelocity[2]
-        #
-        #     imu_msg.linear_acceleration.x = acceleration[0]
-        #     imu_msg.linear_acceleration.y = acceleration[1]
-        #     imu_msg.linear_acceleration.z = acceleration[2]
-        #
-        #     mag_msg.magnetic_field.x = magnetometer[0]
-        #     mag_msg.magnetic_field.y = magnetometer[1]
-        #     mag_msg.magnetic_field.z = magnetometer[2]
-        #
-        #     imu_pub.publish(imu_msg)
-        #     mag_pub.publish(mag_msg)
-
-
 def get_quaternion_from_euler(roll, pitch, yaw):
     """
-    Convert an Euler angle to a quaternion.
-
-    Input
-      :param roll: The roll (rotation around x-axis) angle in radians.
-      :param pitch: The pitch (rotation around y-axis) angle in radians.
-      :param yaw: The yaw (rotation around z-axis) angle in radians.
-
-    Output
-      :return qx, qy, qz, qw: The orientation in quaternion [x,y,z,w] format
+    Convert Euler angles (radians) to quaternion [x, y, z, w].
     """
-    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(
-        yaw / 2)
-    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.cos(pitch / 2) * np.sin(
-        yaw / 2)
-    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(roll / 2) * np.sin(pitch / 2) * np.cos(
-        yaw / 2)
-    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.sin(pitch / 2) * np.sin(
-        yaw / 2)
-
+    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
+    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2)
+    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2)
+    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
     return [qx, qy, qz, qw]
-
 
 class IMUDriverNode(Node):
     def __init__(self, port_name):
         super().__init__('imu_driver_node')
 
-        # 初始化IMU消息
-        self.imu_msg = Imu()
-        self.imu_msg.header.frame_id = 'imu_link'
+        # Frame ID untuk header pesan
+        self.frame_id = 'imu_link'
 
-        # 创建IMU数据发布器
-        self.imu_pub = self.create_publisher(Imu, 'imu/data_raw', 10)
-        #self.port = self.get_parameter('port')
-        #self.baud_rate = self.get_parameter('baud')
+        # Publisher IMU dan Magnetometer
+        qos = QoSProfile(depth=10)
+        self.imu_pub = self.create_publisher(Imu, 'imu/data_raw', qos)
+        self.mag_pub = self.create_publisher(MagneticField, 'imu/mag', qos)
 
-        # 启动IMU驱动线程
-        self.driver_thread = threading.Thread(target=self.driver_loop, args=(port_name,))
+        # Serial port
+        self.port_name = port_name
+        self.baud_rate = 9600
+
+        # Buffer dan state untuk parsing data serial
+        self.buff = {}
+        self.key = 0
+
+        # Data sensor
+        self.acceleration = [0.0, 0.0, 0.0]
+        self.angular_velocity = [0.0, 0.0, 0.0]
+        self.magnetometer = [0.0, 0.0, 0.0]
+        self.angle_degree = [0.0, 0.0, 0.0]
+
+        # Thread untuk membaca data serial
+        self.driver_thread = threading.Thread(target=self.driver_loop, daemon=True)
         self.driver_thread.start()
 
-    def driver_loop(self, port_name):
-        # 打开串口
+    def handle_serial_data(self, raw_byte):
+        """
+        Memproses byte data serial satu per satu, mengumpulkan frame data,
+        dan mengupdate data sensor jika frame lengkap dan valid.
+        """
+        # Simpan byte ke buffer
+        self.buff[self.key] = raw_byte
+        self.key += 1
 
+        # Cek header byte pertama harus 0x55
+        if self.buff.get(0, None) != 0x55:
+            self.key = 0
+            self.buff.clear()
+            return False
+
+        # Tunggu sampai buffer cukup panjang (11 bytes)
+        if self.key < 11:
+            return False
+
+        data_buff = [self.buff[i] for i in range(11)]
+
+        # Cek tipe data berdasarkan byte ke-1
+        data_type = data_buff[1]
+
+        # Fungsi untuk parsing data 8 byte mulai dari index 2
+        def parse_data():
+            return hex_to_short(data_buff[2:10])
+
+        # Cek checksum
+        if not check_sum(data_buff[0:10], data_buff[10]):
+            self.get_logger().warn(f"Checksum failure for data type 0x{data_type:X}")
+            self.key = 0
+            self.buff.clear()
+            return False
+
+        if data_type == 0x51:  # Acceleration
+            raw_acc = parse_data()
+            self.acceleration = [x / 32768.0 * 16 * 9.8 for x in raw_acc]
+
+        elif data_type == 0x52:  # Angular velocity
+            raw_gyro = parse_data()
+            self.angular_velocity = [x / 32768.0 * 2000 * math.pi / 180 for x in raw_gyro]
+
+        elif data_type == 0x53:  # Angle (Euler degree)
+            raw_angle = parse_data()
+            self.angle_degree = [x / 32768.0 * 180 for x in raw_angle]
+
+        elif data_type == 0x54:  # Magnetometer
+            raw_mag = parse_data()
+            self.magnetometer = raw_mag
+
+        else:
+            # Unknown data type, reset buffer
+            self.key = 0
+            self.buff.clear()
+            return False
+
+        # Reset buffer setelah parsing frame
+        self.key = 0
+        self.buff.clear()
+
+        # Return True jika data sudut (0x53) sudah diterima, sebagai tanda update lengkap
+        return data_type == 0x53
+
+    def driver_loop(self):
+        """
+        Thread utama untuk membaca data dari serial port dan memprosesnya.
+        """
         try:
-            wt_imu = serial.Serial(port="/dev/ttyUSB0", baudrate=9600, timeout=0.5)
-            if wt_imu.isOpen():
-                self.get_logger().info("\033[32mSerial port opened successfully...\033[0m")
+            ser = serial.Serial(port=self.port_name, baudrate=self.baud_rate, timeout=0.5)
+            if ser.isOpen():
+                self.get_logger().info(f"Serial port {self.port_name} opened successfully.")
             else:
-                wt_imu.open()
-                self.get_logger().info("\033[32mSerial port opened successfully...\033[0m")
+                ser.open()
+                self.get_logger().info(f"Serial port {self.port_name} opened successfully.")
         except Exception as e:
-            print(e)
-            self.get_logger().info("\033[31mSerial port opening failure\033[0m")
-            exit(0)
+            self.get_logger().error(f"Failed to open serial port {self.port_name}: {e}")
+            return
 
-        # 循环读取IMU数据
-        while True:
-            # 读取加速度计数据
-
+        while rclpy.ok():
             try:
-                buff_count = wt_imu.inWaiting()
-            except Exception as e:
-                print("exception:" + str(e))
-                print("imu disconnect")
-                exit(0)
-            else:
+                buff_count = ser.in_waiting
                 if buff_count > 0:
-                    buff_data = wt_imu.read(buff_count)
-                    for i in range(0, buff_count):
-                        tag = handle_serial_data(buff_data[i])
-                        if tag:
-                            self.imu_data()
+                    buff_data = ser.read(buff_count)
+                    for b in buff_data:
+                        updated = self.handle_serial_data(b)
+                        if updated:
+                            self.publish_imu_and_mag()
+                else:
+                    time.sleep(0.01)
+            except Exception as e:
+                self.get_logger().error(f"Serial read error: {e}")
+                break
 
-    def imu_data(self):
-        accel_x, accel_y, accel_z = acceleration[0], acceleration[1], acceleration[2]  # struct.unpack('hhh', accel_raw)
-        accel_scale = 16 / 32768.0
-        accel_x, accel_y, accel_z = accel_x * accel_scale, accel_y * accel_scale, accel_z * accel_scale
+        ser.close()
+        self.get_logger().info("Serial port closed.")
 
-        # 读取陀螺仪数据
-        gyro_x, gyro_y, gyro_z = angularVelocity[0], angularVelocity[1], angularVelocity[
-            2]  # struct.unpack('hhh', gyro_raw)
-        gyro_scale = 2000 / 32768.0
-        gyro_x, gyro_y, gyro_z = math.radians(gyro_x * gyro_scale), math.radians(gyro_y * gyro_scale), math.radians(
-            gyro_z * gyro_scale)
+    def publish_imu_and_mag(self):
+        """
+        Membuat dan mempublish pesan IMU dan Magnetometer ke ROS2.
+        """
+        # Update header timestamp
+        now = self.get_clock().now().to_msg()
 
-        # 计算角速度
-        dt = 0.01
-        wx, wy, wz = gyro_x, gyro_y, gyro_z
-        ax, ay, az = accel_x, accel_y, accel_z
-        roll, pitch, yaw = self.compute_orientation(wx, wy, wz, ax, ay, az, dt)
+        # IMU message
+        imu_msg = Imu()
+        imu_msg.header.stamp = now
+        imu_msg.header.frame_id = self.frame_id
 
-        # 更新IMU消息
-        self.imu_msg.header.stamp = self.get_clock().now().to_msg()
-        self.imu_msg.linear_acceleration.x = accel_x
-        self.imu_msg.linear_acceleration.y = accel_y
-        self.imu_msg.linear_acceleration.z = accel_z
-        self.imu_msg.angular_velocity.x = gyro_x
-        self.imu_msg.angular_velocity.y = gyro_y
-        self.imu_msg.angular_velocity.z = gyro_z
+        # Linear acceleration (m/s^2)
+        imu_msg.linear_acceleration.x = self.acceleration[0]
+        imu_msg.linear_acceleration.y = self.acceleration[1]
+        imu_msg.linear_acceleration.z = self.acceleration[2]
 
-        angle_radian = [angle_degree[i] * math.pi / 180 for i in range(3)]
+        # Angular velocity (rad/s)
+        imu_msg.angular_velocity.x = self.angular_velocity[0]
+        imu_msg.angular_velocity.y = self.angular_velocity[1]
+        imu_msg.angular_velocity.z = self.angular_velocity[2]
 
-        qua = get_quaternion_from_euler(angle_radian[0], angle_radian[1], angle_radian[2])
+        # Orientation quaternion dari Euler angle (radian)
+        roll = math.radians(self.angle_degree[0])
+        pitch = math.radians(self.angle_degree[1])
+        yaw = math.radians(self.angle_degree[2])
+        qx, qy, qz, qw = get_quaternion_from_euler(roll, pitch, yaw)
 
-        self.imu_msg.orientation.x = qua[0]
-        self.imu_msg.orientation.y = qua[1]
-        self.imu_msg.orientation.z = qua[2]
-        self.imu_msg.orientation.w = qua[3]
+        imu_msg.orientation.x = qx
+        imu_msg.orientation.y = qy
+        imu_msg.orientation.z = qz
+        imu_msg.orientation.w = qw
 
-        # 发布IMU消息
-        self.imu_pub.publish(self.imu_msg)
+        # Publish IMU data
+        self.imu_pub.publish(imu_msg)
 
-    def compute_orientation(self, wx, wy, wz, ax, ay, az, dt):
-        # 计算旋转矩阵
-        Rx = np.array([[1, 0, 0],
-                       [0, math.cos(ax), -math.sin(ax)],
-                       [0, math.sin(ax), math.cos(ax)]])
-        Ry = np.array([[math.cos(ay), 0, math.sin(ay)],
-                       [0, 1, 0],
-                       [-math.sin(ay), 0, math.cos(ay)]])
-        Rz = np.array([[math.cos(wz), -math.sin(wz), 0],
-                       [math.sin(wz), math.cos(wz), 0],
-                       [0, 0, 1]])
-        R = Rz.dot(Ry).dot(Rx)
+        # MagneticField message
+        mag_msg = MagneticField()
+        mag_msg.header.stamp = now
+        mag_msg.header.frame_id = self.frame_id
 
-        # 计算欧拉角
-        roll = math.atan2(R[2][1], R[2][2])
-        pitch = math.atan2(-R[2][0], math.sqrt(R[2][1] ** 2 + R[2][2] ** 2))
-        yaw = math.atan2(R[1][0], R[0][0])
+        # Data magnetometer biasanya dalam unit microtesla (uT)
+        # Jika data mentah, bisa dikalibrasi sesuai datasheet sensor
+        # Di sini kita asumsikan data sudah dalam uT atau perlu skala sesuai sensor
+        mag_msg.magnetic_field.x = float(self.magnetometer[0])
+        mag_msg.magnetic_field.y = float(self.magnetometer[1])
+        mag_msg.magnetic_field.z = float(self.magnetometer[2])
 
-        return roll, pitch, yaw
+        # Publish magnetometer data
+        self.mag_pub.publish(mag_msg)
 
-
-def main():
-    # 初始化ROS 2节点
-    rclpy.init()
-    node = IMUDriverNode('/dev/ttyUSB0')
-
-    # 运行ROS 2节点
+def main(args=None):
+    rclpy.init(args=args)
+    port = '/dev/ttyUSB0'  # Ganti sesuai port Anda
+    imu_node = IMUDriverNode(port)
     try:
-        rclpy.spin(node)
+        rclpy.spin(imu_node)
     except KeyboardInterrupt:
         pass
-
-    # 停止ROS 2节点
-    node.destroy_node()
+    imu_node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
