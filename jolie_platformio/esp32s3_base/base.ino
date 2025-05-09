@@ -71,7 +71,7 @@ FIR firBR(firOrder, firCoefficients);
 #ifdef UsePID
 #include <MiniPID.h>
 // Konstanta PID (tuning lebih lanjut diperlukan)
-float kp = 0.005, ki = 0.001, kd = 0.0;
+float kp = 0.01, ki = 0.001, kd = 0.0;
 MiniPID pidFL(kp, ki, kd);
 MiniPID pidFR(kp, ki, kd);
 MiniPID pidBL(kp, ki, kd);
@@ -339,6 +339,8 @@ void tuning_subscription_callback(const void * msgin) {
           pidBL.setD(value);
           pidBR.setD(value);
         }
+
+
       }
       // Command tanpa parameter
       else if(parsed == 1) {
