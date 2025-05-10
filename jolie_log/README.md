@@ -40,4 +40,17 @@ This file contains the date logs for each development progress. It contains the 
 ### [2025-05-20]
 - **Progress**: 
     - sudo apt-get install ros-humble-imu-tools
-    
+
+### [2025-05-10]
+- **Progress**
+
+    Running al system
+    ```bash
+    ros2 launch jolie_bringup real_robot.launch.py
+
+    docker run -it --rm --net=host --device=/dev/ttyACM0 microros/micro-ros-agent:humble serial --dev /dev/ttyACM0
+
+    ros2 launch jolie_localization local_localization.launch.py
+
+    ros2 launch jolie_mapping slam.launch.py
+    ```
