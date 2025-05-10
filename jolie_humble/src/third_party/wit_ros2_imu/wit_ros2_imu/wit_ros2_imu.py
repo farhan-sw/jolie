@@ -205,7 +205,7 @@ class IMUDriverNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    port = '/dev/ttyUSB0'  # Ganti sesuai port Anda
+    port = '/dev/ttyUSB1'  # Ganti sesuai port Anda
     imu_node = IMUDriverNode(port)
     try:
         rclpy.spin(imu_node)
