@@ -1,0 +1,53 @@
+min_pwm: -1.0
+max_pwm: 1.0
+scenarios:
+  - type: step
+    start: 2.0
+    end: 2.5
+    value: 0.1
+  - type: step
+    start: 2.5
+    end: 4.0
+    value: 0.2
+  - type: step
+    start: 4.0
+    end: 5.5
+    value: 0.3
+  - type: step
+    start: 5.5
+    end: 7.0
+    value: 0.4
+  - type: step
+    start: 7.0
+    end: 8.5
+    value: 0.5
+  - type: step
+    start: 8.5
+    end: 10.0
+    value: 0.6
+  - type: step
+    start: 10.0
+    end: 11.5
+    value: 0.7
+  - type: step
+    start: 11.5
+    end: 13.0
+    value: 0.8
+  - type: step
+    start: 13.0
+    end: 14.5
+    value: 0.9
+  - type: step
+    start: 14.5
+    end: 16.0
+    value: 1.0
+  - type: sinus
+    start: 18.0
+    end: 28.0
+    frequency: 0.1   # 1 Hz
+    amplitude: 1.0
+  - type: ramp
+    start: 28.0
+    end: 38.0
+    start_value: 0
+    end_value: 1.0
