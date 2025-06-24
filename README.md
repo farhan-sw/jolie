@@ -324,6 +324,9 @@ sudo chmod 666 /dev/ttyACM0  # or your device
 # Try different baud rates
 docker run -it --rm --net=host --device=/dev/ttyACM0 microros/micro-ros-agent:humble serial --dev /dev/ttyACM0 -b 115200
 
+# Debug: If not connected (indicated by lots of text printing), 
+# try pressing the reset button on the ESP32 to restart the connection
+
 # Check ESP32 serial output
 screen /dev/ttyACM0 115200
 ```
