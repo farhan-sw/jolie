@@ -51,7 +51,9 @@ This file contains the date logs for each development progress. It contains the 
     ```bash
     ros2 launch jolie_bringup real_robot.launch.py
 
-    docker run -it --rm --net=host --device=/dev/ttyACM0 microros/micro-ros-agent:humble serial --dev /dev/ttyACM0
+    docker run -it --rm --net=host --device=/dev/STM32 microros/micro-ros-agent:humble serial --dev /dev/STM32 -b 115200
+
+    docker run -it --rm --net=host --device=/dev/ttyACM0 microros/micro-ros-agent:humble serial --dev /dev/ttyACM0 -b 921500
 
     ros2 launch jolie_localization local_localization.launch.py
 
